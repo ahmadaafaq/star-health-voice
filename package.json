@@ -1,0 +1,27 @@
+{
+  "name": "star-health-voice-agent",
+  "version": "1.0.0",
+  "description": "Automated outbound call scheduler for Star Health Insurance using ElevenLabs AI + Twilio",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "build": "tsc --outDir dist && tsc-alias",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.50.0",
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "node-cron": "^3.0.3",
+    "twilio": "^5.5.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.0",
+    "@types/node-cron": "^3.0.11",
+    "tsx": "^4.19.2",
+    "typescript": "~5.8.2"
+  }
+}
