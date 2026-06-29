@@ -52,38 +52,184 @@ export function analyzeCallSummary(summary: string) {
   return { score, type, explanation };
 }
 
+// ── Compact, voice-friendly policy catalog (injected once per call session) ──
+// This eliminates the need for the ElevenLabs Knowledge Base entirely.
+// All 8 Star Health plans are pre-loaded into the LLM context at call start,
+// so the agent can answer questions about ANY plan with zero per-turn latency.
+const STAR_HEALTH_PLANS_CONTEXT = `
+Star Health Insurance Plans:
+1. Arogya Sanjeevani — IRDAI standard plan. Sum insured ₹5L–₹2Cr. 5% co-pay. Cumulative bonus up to 50%. Affordable entry-level option.
+2. Family Health Optima (FHO) — Family floater. Sum insured ₹5L–₹25L. Automatic restoration. Newborn cover from day 1. Loyalty bonus up to 100%. Ideal for multi-generation families.
+3. Medi Classic (Individual) — Individual plan. Sum insured ₹5L–₹15L. No co-pay. Pre/post hospitalisation covered. Long-term discounts available. Good for single adults.
+4. Star Health Assure — Comprehensive floater for up to 9 members. Unlimited restoration. Wellness discount up to 20%. Best for large families or those wanting premium coverage.
+5. Star Health Premier — Designed for 50+ age group. No upper age limit. Home care covered. AYUSH covered. Wellness program included. Best for seniors and parents.
+6. Young Star Insurance — For young adults and families. Unlimited sum insured restoration. Wellness rewards. Silver and Gold variants. Best for young couples and individuals under 35.
+7. Super Star — Star Health flagship plan. Sum insured ₹5L–₹5Cr. No co-pay. Broadest coverage available. Best for those wanting maximum protection.
+8. Star Comprehensive — All-round plan. Sum insured ₹5L–₹1Cr. No co-pay. OPD cover. Maternity benefit. Worldwide emergency cover. No room rent cap. Best for maternity or OPD needs.
+`.trim();
+
+// Helper to build a human-readable "why this plan" explanation from lead profile
+function buildWhyExplanation(lead: any, policyName: string): string {
+  const parts: string[] = [];
+
+  // Members
+  const members: string[] = lead.members || [];
+  if (members.length > 0) {
+    parts.push(`covering ${members.join(', ')}`);
+  }
+
+  // Age
+  if (lead.age) {
+    parts.push(`at age ${lead.age}`);
+  }
+
+  // City
+  if (lead.city) {
+    parts.push(`based in ${lead.city}`);
+  }
+
+  // Budget
+  if (lead.budget) {
+    parts.push(`with a ${lead.budget} budget`);
+  }
+
+  // Pre-existing conditions
+  const ped: string[] = lead.pre_existing_diseases || [];
+  if (lead.diabetes) {
+    if (!ped.includes('diabetes')) ped.push('diabetes');
+  }
+  if (ped.length > 0) {
+    parts.push(`and pre-existing conditions including ${ped.join(', ')}`);
+  }
+
+  // Special flags
+  const flags: string[] = [];
+  if (lead.parents_included) flags.push('parents are included in the plan');
+  if (lead.pregnancy_plan) flags.push('maternity cover is needed');
+  if (lead.employer_insurance) flags.push('existing employer insurance');
+
+  if (flags.length > 0) {
+    parts.push(flags.join('; '));
+  }
+
+  const profileSummary = parts.length > 0
+    ? `Based on your profile — ${parts.join(', ')} — `
+    : '';
+
+  return `${profileSummary}the ${policyName} was recommended as the best match for your needs. It provides the right balance of coverage, premium, and benefits tailored to your situation. If you have questions about this plan or want to compare it with another, I can help you right now.`;
+}
+
+// Helper to build a compact one-line profile snapshot
+function buildProfileSummary(lead: any): string {
+  const parts: string[] = [];
+  if (lead.age) parts.push(`${lead.age} years old`);
+  const members: string[] = lead.members || [];
+  if (members.length > 0) parts.push(`family: ${members.join(', ')}`);
+  if (lead.city) parts.push(lead.city);
+  if (lead.budget) parts.push(`${lead.budget} budget`);
+  const ped: string[] = lead.pre_existing_diseases || [];
+  if (lead.diabetes && !ped.includes('diabetes')) ped.push('diabetes');
+  if (ped.length > 0) parts.push(`conditions: ${ped.join(', ')}`);
+  return parts.length > 0 ? parts.join(' | ') : 'Profile not available';
+}
+
 // Twilio webhook to handle answered outbound calls
 router.post('/twiml', express.urlencoded({ extended: true }), async (req, res) => {
   try {
     console.log(`Received /twiml webhook from Twilio for CallSid: ${req.body.CallSid}`);
+
     // These were passed as query parameters in our initiateCall function
     const leadId = req.query.leadId as string;
-    const name = req.query.name as string || '';
-    const designation = req.query.designation as string || 'Sir / Ma\'am';
+    const nameParam = req.query.name as string || '';
+    const designationParam = req.query.designation as string || 'Sir / Ma\'am';
     const rawPolicy = req.query.policy as string || '';
-    const policy = getPolicyName(rawPolicy);
 
-    // Request secure TwiML from ElevenLabs using the register-call endpoint
+    // ── Step 1: Fetch the full lead profile from Supabase (once per call) ──
+    let lead: any = null;
+    let name = nameParam;
+    let designation = designationParam;
+    let policy = getPolicyName(rawPolicy);
+
+    if (leadId) {
+      const { data: leadData, error: leadError } = await supabase
+        .from('leads')
+        .select('*')
+        .eq('id', leadId)
+        .single();
+
+      if (leadError) {
+        console.warn(`Could not fetch lead ${leadId} from Supabase:`, leadError.message);
+      } else if (leadData) {
+        lead = leadData;
+        // Override with fresher data from DB if available
+        name = leadData.name || nameParam;
+        if (leadData.gender === 'male') designation = 'Sir';
+        else if (leadData.gender === 'female') designation = "Ma'am";
+        policy = getPolicyName(leadData.recommended_plan_id || leadData.policy || rawPolicy);
+        console.log(`Fetched lead profile for ${name} (${leadId}): plan=${policy}`);
+      }
+    }
+
+    // ── Step 2: Build rich context strings from the lead profile ──
+    const whyThisPlan = buildWhyExplanation(lead || {}, policy);
+    const customerProfileSummary = buildProfileSummary(lead || {});
+    const customerAge = (lead?.age || '').toString();
+    const customerCity = lead?.city || '';
+    const customerBudget = lead?.budget || '';
+    const customerMembers = (lead?.members || []).join(', ') || 'not specified';
+    const hasDiabetes = lead?.diabetes ? 'yes' : 'no';
+    const hasParents = lead?.parents_included ? 'yes' : 'no';
+    const hasEmployerInsurance = lead?.employer_insurance ? 'yes' : 'no';
+    const needsMaternity = lead?.pregnancy_plan ? 'yes' : 'no';
+    const preExistingConditions = (() => {
+      const ped: string[] = lead?.pre_existing_diseases || [];
+      if (lead?.diabetes && !ped.includes('diabetes')) ped.push('diabetes');
+      return ped.length > 0 ? ped.join(', ') : 'none';
+    })();
+
+    // ── Step 3: Register call with ElevenLabs, injecting all context upfront ──
     const response = await axios.post(
       'https://api.elevenlabs.io/v1/convai/twilio/register-call',
       {
         agent_id: config.elevenlabs.agentId,
-        from_number: config.twilio.phoneNumber, // We might want to pass the actual From if available
+        from_number: config.twilio.phoneNumber,
         to_number: req.body.To || req.query.to || '',
         conversation_initiation_client_data: {
           dynamic_variables: {
-            name: name,
+            // ── Identity ──────────────────────────────────────────────────
+            name,
             customer_name: name,
             customerName: name,
             user_name: name,
             userName: name,
-            designation: designation,
-            policy: policy,
+            designation,
+
+            // ── Recommended plan ──────────────────────────────────────────
+            policy,
             policyName: policy,
             policy_name: policy,
             recommended_plan: policy,
             recommended_policy: policy,
-            recommended_plan_name: policy
+            recommended_plan_name: policy,
+
+            // ── Why this plan was chosen (personalized explanation) ───────
+            why_this_plan: whyThisPlan,
+
+            // ── Customer profile snapshot ─────────────────────────────────
+            customer_profile_summary: customerProfileSummary,
+            customer_age: customerAge,
+            customer_city: customerCity,
+            customer_budget: customerBudget,
+            customer_members: customerMembers,
+            has_diabetes: hasDiabetes,
+            has_parents: hasParents,
+            has_employer_insurance: hasEmployerInsurance,
+            needs_maternity: needsMaternity,
+            pre_existing_conditions: preExistingConditions,
+
+            // ── Full policy catalog (eliminates ElevenLabs KB per-turn lookup) ──
+            // Agent can answer questions about ANY of the 8 plans instantly.
+            all_plans_context: STAR_HEALTH_PLANS_CONTEXT,
           }
         }
       },
@@ -102,6 +248,7 @@ router.post('/twiml', express.urlencoded({ extended: true }), async (req, res) =
     res.status(500).send('Error generating TwiML');
   }
 });
+
 
 // Test endpoint to manually trigger a call for Arjun
 router.post('/test-call', express.json(), async (req, res) => {

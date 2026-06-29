@@ -19,4 +19,17 @@ export interface Lead {
   call_status?: 'pending' | 'dialing' | 'completed' | 'failed';
   age?: number;
   city?: string;
+  // Onboarding profile fields
+  members?: string[];
+  budget?: string;
+  pre_existing_diseases?: string[];
+  diabetes?: boolean;
+  parents_included?: boolean;
+  employer_insurance?: boolean;
+  pregnancy_plan?: boolean;
+  preferred_hospital?: string;
+  // AI recommendation & scoring
+  ai_rank_score?: number;
+  ai_rank_explanation?: string;
+  lead_type?: string;
 }
