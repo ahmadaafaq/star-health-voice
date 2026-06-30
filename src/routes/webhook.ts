@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import axios from 'axios';
 import crypto from 'crypto';
 import { initiateCall } from '../twilioClient.js';
+import { AccessToken } from 'livekit-server-sdk';
 
 const router = express.Router();
 
@@ -268,6 +269,48 @@ router.post('/test-call', express.json(), async (req, res) => {
     res.json({ success: true, callSid: call.sid });
   } catch (error: any) {
     console.error("Test call error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Endpoint to generate LiveKit WebRTC tokens for client browser session
+router.get('/token', async (req, res) => {
+  try {
+    const leadId = req.query.leadId as string;
+    const roomName = `browser-room-${leadId || 'anonymous'}-${Math.random().toString(36).substring(2, 8)}`;
+    const participantIdentity = `customer-${leadId || Math.random().toString(36).substring(2, 8)}`;
+
+    const apiKey = process.env.LIVEKIT_API_KEY;
+    const apiSecret = process.env.LIVEKIT_API_SECRET;
+
+    if (!apiKey || !apiSecret) {
+      return res.status(500).json({ error: "LiveKit server credentials missing in .env" });
+    }
+
+    const at = new AccessToken(apiKey, apiSecret, {
+      identity: participantIdentity,
+      name: leadId ? `Customer ${leadId}` : "Web Visitor",
+      metadata: JSON.stringify({ lead_id: leadId })
+    });
+
+    at.addGrant({
+      roomJoin: true,
+      room: roomName,
+      canPublish: true,
+      canSubscribe: true,
+      canPublishData: true
+    });
+
+    const token = await at.toJwt();
+    console.log(`Generated LiveKit token for lead ${leadId || 'anonymous'} in room ${roomName}`);
+    
+    res.json({
+      token,
+      roomName,
+      livekitUrl: process.env.LIVEKIT_URL || 'wss://insurance-agent-m3m6v0tz.livekit.cloud'
+    });
+  } catch (error: any) {
+    console.error("Error generating LiveKit token:", error);
     res.status(500).json({ error: error.message });
   }
 });
