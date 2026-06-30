@@ -1,14 +1,6 @@
-import twilio from 'twilio';
-import { config } from './config.js';
+import { exec } from 'child_process';
 import { Lead } from './supabase.js';
-
-let twilioClient: twilio.Twilio;
-
-try {
-  twilioClient = twilio(config.twilio.accountSid, config.twilio.authToken);
-} catch (error) {
-  console.error("Failed to initialize Twilio client", error);
-}
+import path from 'path';
 
 export function getPolicyName(policyId: string): string {
   const plans: Record<string, string> = {
@@ -40,43 +32,32 @@ export function normalisePhone(raw: string): string {
   return cleaned.startsWith("+") ? cleaned : (digits ? `+${digits}` : cleaned);
 }
 
-export async function initiateCall(lead: Lead, twimlUrl: string) {
-  if (!twilioClient) {
-    throw new Error("Twilio client is not initialized");
-  }
-
+export async function initiateCall(lead: Lead, twimlUrl: string): Promise<{ sid: string }> {
   const normalisedTo = normalisePhone(lead.phone || '');
   if (!normalisedTo) {
     throw new Error(`Lead ${lead.id} has no valid phone number`);
   }
 
-  try {
-    // Determine designation based on gender
-    let designation = '';
-    if (lead.gender === 'male') designation = 'Sir';
-    else if (lead.gender === 'female') designation = "Ma'am";
+  return new Promise((resolve, reject) => {
+    // Run the Python LiveKit outbound SIP dispatch script
+    const scriptPath = path.join(process.cwd(), 'make_call.py');
+    const pythonPath = path.join(process.cwd(), 'venv', 'bin', 'python');
     
-    // We encode the lead details into the TwiML URL so our webhook can generate dynamic TwiML
-    const encodedName = encodeURIComponent(lead.name || '');
-    const encodedDesignation = encodeURIComponent(designation);
-    const policyName = getPolicyName(lead.policy || lead.recommended_plan_id || '');
-    const encodedPolicy = encodeURIComponent(policyName);
-    const encodedId = encodeURIComponent(lead.id);
+    const command = `"${pythonPath}" "${scriptPath}" --to "${normalisedTo}" --lead-id "${lead.id}"`;
+    console.log(`Executing LiveKit outbound SIP call: ${command}`);
 
-    const fullTwimlUrl = `${twimlUrl}?leadId=${encodedId}&name=${encodedName}&designation=${encodedDesignation}&policy=${encodedPolicy}`;
-
-    console.log(`Initiating call to ${normalisedTo} for lead ${lead.id}...`);
-
-    const call = await twilioClient.calls.create({
-      url: fullTwimlUrl,
-      to: normalisedTo,
-      from: config.twilio.phoneNumber,
+    exec(command, (error, stdout, stderr) => {
+      if (error) {
+        console.error(`Error initiating LiveKit SIP call: ${error.message}`);
+        console.error(`Stderr: ${stderr}`);
+        return reject(error);
+      }
+      
+      console.log(`LiveKit dispatch stdout: ${stdout}`);
+      
+      // Generate a mock SID for UI/tracking
+      const mockSid = `LK_${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+      resolve({ sid: mockSid });
     });
-
-    console.log(`Call initiated successfully. Call SID: ${call.sid}`);
-    return call;
-  } catch (error) {
-    console.error(`Error making call to ${normalisedTo}:`, error);
-    throw error;
-  }
+  });
 }
