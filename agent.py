@@ -155,14 +155,8 @@ async def entrypoint(ctx: JobContext):
             target_language_code=config.SARVAM_LANGUAGE,
         ),
         vad=vad,
+        tools=[search_policies, remember_detail, recall_detail, search_memories, send_whatsapp_details],
     )
-
-    # ── Register function tools on the session ─────────────────────────────────
-    session.register_tool(search_policies)
-    session.register_tool(remember_detail)
-    session.register_tool(recall_detail)
-    session.register_tool(search_memories)
-    session.register_tool(send_whatsapp_details)
 
     # ── Start the session ──────────────────────────────────────────────────────
     await session.start(ctx.room, agent=agent)
