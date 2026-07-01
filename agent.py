@@ -162,7 +162,10 @@ async def entrypoint(ctx: JobContext):
     await session.start(agent=agent, room=ctx.room)
     logger.info("Agent session started. Waiting for call to end...")
 
-    await session.wait_for_disconnection()
+    # ── Wait for disconnection ──────────────────────────────────────────────────
+    from livekit.rtc import ConnectionState
+    while ctx.room.connection_state != ConnectionState.CONN_DISCONNECTED:
+        await asyncio.sleep(1)
     logger.info(f"Call ended for room: {ctx.room.name}")
 
     # ─── Post-Call Auto-Analysis & Supabase Update ───────────────────────────
