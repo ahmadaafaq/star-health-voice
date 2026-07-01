@@ -9,12 +9,12 @@ GROQ_TEMPERATURE = 0.6
 
 # ─── STT (Deepgram) ───────────────────────────────────────────────────────────
 DEEPGRAM_STT_MODEL = "nova-2-general"
-DEEPGRAM_STT_LANGUAGE = "en-IN"
+DEEPGRAM_STT_LANGUAGE = "hi"       # Hindi & Hinglish support
 
 # ─── TTS (Sarvam) ─────────────────────────────────────────────────────────────
 SARVAM_MODEL = "bulbul:v2"
-SARVAM_VOICE = "anushka"          # Female, Indian English
-SARVAM_LANGUAGE = "en-IN"
+SARVAM_VOICE = "anushka"          # Anushka supports both hi-IN and en-IN
+SARVAM_LANGUAGE = "hi-IN"         # Synthesizes Hindi/Hinglish speech
 
 # ─── VAD (Silero) ─────────────────────────────────────────────────────────────
 # Lower min_silence_duration = faster response but may interrupt the user
