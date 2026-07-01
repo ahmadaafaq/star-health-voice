@@ -83,15 +83,18 @@ class StarHealthAgent(Agent):
         """Generate the opening greeting as soon as the agent joins the room."""
         name = self._lead.get("name", "")
         first_name = name.split()[0] if name else ""
+        gender = self._lead.get("gender", "").strip().lower()
+        salutation = "Sir" if gender == "male" else "Ma'am" if gender == "female" else "Sir or Ma'am"
         recommended_plan = self._lead.get("recommended_plan") or self._lead.get("recommendedPlan", "")
 
         greeting_instruction = (
             f"Greet the customer warmly. Their name is {name or 'unknown'}. "
-            f"Address them as {first_name or 'Sir or Ma am'}. "
+            f"Address them as {first_name or salutation}. "
             f"Say you are Priya from Star Health Insurance. "
             f"Mention you are calling about their health insurance assessment "
             f"{'and their interest in the ' + recommended_plan + ' plan' if recommended_plan else ''}. "
-            "Ask if this is a good time to talk. Keep it to 2 sentences maximum."
+            f"Ask if this is a good time to talk. Keep it to 2 sentences maximum. "
+            f"Never address them as bhaiya, didi, or other colloquial terms; only use Sir/Ma'am or their name."
         )
 
         await self.session.generate_reply(instructions=greeting_instruction)

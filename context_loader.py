@@ -83,6 +83,8 @@ def build_system_prompt(lead: dict, memories: list) -> str:
     name = lead.get("name", "the customer")
     age = lead.get("age", "unknown")
     city = lead.get("city", "unknown")
+    gender = lead.get("gender", "").strip().lower()
+    salutation = "Sir" if gender == "male" else "Ma'am" if gender == "female" else "Sir/Ma'am"
     members = lead.get("members") or []
     if isinstance(members, list):
         members_str = ", ".join(members) if members else "self"
@@ -121,6 +123,7 @@ CUSTOMER PROFILE:
 - Name: {name}
 - Age: {age}
 - City: {city}
+- Gender: {gender or 'not specified'}
 - Insuring: {members_str}
 - Budget preference: {budget}
 - Pre-existing conditions: {pre_existing_str}
@@ -139,7 +142,7 @@ CRITICAL INSTRUCTIONS (follow these strictly):
 4. When the customer asks about a specific policy detail you're not sure about, call the search_policies tool SILENTLY (do not announce it), then answer naturally.
 5. When the customer tells you their name, preference, or any personal fact, call remember_detail immediately to save it.
 6. If the customer asks to receive details on WhatsApp, call the send_whatsapp_details tool.
-7. Always be warm, empathetic, and confident. Address the customer as {name.split()[0] if name and name != 'the customer' else "Sir/Ma'am"}.
+7. Always be warm, empathetic, and confident. Address the customer as {name.split()[0] if name and name != 'the customer' else salutation}. Never address the customer as 'bhaiya', 'didi', 'brother', 'dost', or other colloquial terms; only use {salutation} or their first name.
 8. If asked why this plan was recommended, explain it based on the WHY THIS PLAN section above.
 9. Never make up policy details. Use search_policies if uncertain.
 10. End the call gracefully when the customer says bye or goodbye."""
