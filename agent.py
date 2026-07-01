@@ -108,7 +108,7 @@ class StarHealthAgent(Agent):
         from livekit.agents.utils import aio
 
         wrapped_tts = tts.StreamAdapter(
-            tts=self.tts,
+            tts=self.session.tts,
             sentence_tokenizer=tokenize.basic.SentenceTokenizer(),
         )
 
@@ -187,6 +187,7 @@ async def entrypoint(ctx: JobContext):
         ),
         vad=vad,
         tools=[search_policies, remember_detail, recall_detail, search_memories, send_whatsapp_details],
+        userdata={"lead_id": lead_id, "lead": lead},
     )
 
     # ── Start the session ──────────────────────────────────────────────────────
