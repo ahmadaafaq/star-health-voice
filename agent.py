@@ -159,7 +159,7 @@ async def entrypoint(ctx: JobContext):
     )
 
     # ── Start the session ──────────────────────────────────────────────────────
-    await session.start(ctx.room, agent=agent)
+    await session.start(agent=agent, room=ctx.room)
     logger.info("Agent session started. Waiting for call to end...")
 
     await session.wait_for_disconnection()
