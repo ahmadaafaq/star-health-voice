@@ -19,6 +19,7 @@ os.environ["SSL_CERT_FILE"] = certifi.where()
 import asyncio
 import json
 import logging
+from typing import Any, AsyncIterable
 
 from dotenv import load_dotenv
 from livekit import agents
@@ -94,6 +95,36 @@ class StarHealthAgent(Agent):
         )
 
         await self.session.generate_reply(instructions=greeting_instruction)
+
+    async def tts_node(
+        self, text: AsyncIterable[str], model_settings: Any
+    ):
+        """
+        Forces sentence-level buffering before sending text to the Sarvam Bulbul TTS.
+        Without this, text streams token-by-token (word-by-word) to Sarvam's API,
+        ruining natural prosody, breaking words, and increasing roundtrip latency.
+        """
+        from livekit.agents import tts, tokenize
+        from livekit.agents.utils import aio
+
+        wrapped_tts = tts.StreamAdapter(
+            tts=self.tts,
+            sentence_tokenizer=tokenize.basic.SentenceTokenizer(),
+        )
+
+        conn_options = self.session.conn_options.tts_conn_options
+        async with wrapped_tts.stream(conn_options=conn_options) as stream:
+            async def _forward_input():
+                async for chunk in text:
+                    stream.push_text(chunk)
+                stream.end_input()
+
+            forward_task = asyncio.create_task(_forward_input())
+            try:
+                async for ev in stream:
+                    yield ev.frame
+            finally:
+                await aio.cancel_and_wait(forward_task)
 
 
 # ─── Entrypoint — called for every new call/room ─────────────────────────────
