@@ -154,7 +154,7 @@ async def entrypoint(ctx: JobContext):
 
     # ── WebRTC Inbound Call Fallback: Resolve lead_id from active room participants ──
     if not lead_id:
-        for identity, participant in ctx.room.active_participants.items():
+        for identity, participant in ctx.room.remote_participants.items():
             if identity.startswith("customer-"):
                 try:
                     p_meta = json.loads(participant.metadata or "{}")
