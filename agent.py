@@ -146,7 +146,30 @@ async def entrypoint(ctx: JobContext):
         logger.warning(f"Could not parse job metadata: {ctx.job.metadata!r}")
 
     lead_id = metadata.get("lead_id") or metadata.get("leadId")
-    logger.info(f"Lead ID from metadata: {lead_id}")
+    if lead_id in ("undefined", "null", "anonymous", ""):
+        lead_id = None
+
+    # ── WebRTC Inbound Call Fallback: Resolve lead_id from active room participants ──
+    if not lead_id:
+        for identity, participant in ctx.room.active_participants.items():
+            if identity.startswith("customer-"):
+                try:
+                    p_meta = json.loads(participant.metadata or "{}")
+                    p_lead_id = p_meta.get("lead_id") or p_meta.get("leadId")
+                    if p_lead_id and p_lead_id not in ("undefined", "null", "anonymous", ""):
+                        lead_id = p_lead_id
+                        logger.info(f"Resolved lead_id from participant metadata: {lead_id}")
+                        break
+                except Exception:
+                    pass
+
+                parts = identity.split("-")
+                if len(parts) > 1 and parts[1] and parts[1] not in ("undefined", "null", "anonymous", ""):
+                    lead_id = parts[1]
+                    logger.info(f"Resolved lead_id from participant identity: {lead_id}")
+                    break
+
+    logger.info(f"Final resolved Lead ID for session: {lead_id}")
 
     # ── Pre-load lead + memories (once per call, no per-turn overhead) ─────────
     lead, memories = await preload_lead(lead_id)

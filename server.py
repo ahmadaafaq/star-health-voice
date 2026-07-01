@@ -76,6 +76,9 @@ async def get_token(leadId: Optional[str] = Query(None)):
     Generate a secure LiveKit WebRTC AccessToken for browser voice client.
     """
     try:
+        if leadId in ("undefined", "null", "anonymous", ""):
+            leadId = None
+
         room_name = f"browser-room-{leadId or 'anonymous'}-{os.urandom(3).hex()}"
         participant_identity = f"customer-{leadId or os.urandom(3).hex()}"
 
