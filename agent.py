@@ -355,7 +355,6 @@ async def entrypoint(ctx: JobContext):
         # Fewer tools = faster LLM tool-selection decisions
         tools=[search_policies, remember_detail, send_whatsapp_details],
         userdata={"lead_id": lead_id, "lead": lead},
-        max_function_call_steps=2,  # Prevent chained RAG spirals that cause 3-5s silence
     )
 
     # ── Start the session ──────────────────────────────────────────────────────
