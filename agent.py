@@ -121,7 +121,7 @@ class StarHealthAgent(Agent):
                 f"{('Briefly say why: ' + reason_snippet + '. ') if reason_snippet else ''}"
                 f"Then ask: 'क्या आप इसके बारे में जानना चाहेंगे?' (or similar). "
                 f"Keep it to exactly 2 natural spoken sentences. "
-                f"No markdown, no lists. Never use bhaiya, didi, or generic Sir/Ma'am."
+                f"No markdown, no lists. Never use bhaiya, didi"
             )
         else:
             greeting_instruction = (
