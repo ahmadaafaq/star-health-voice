@@ -94,17 +94,7 @@ async def dispatch_call(phone_number: str = None, lead_id: str = None):
             )
         )
         logger.info(f"✅ SIP participant created: {sip_participant.participant_id}")
-
-        # Dispatch the agent to handle the room
-        await lk_api.agent.create_agent_dispatch(
-            api.CreateAgentDispatchRequest(
-                agent_name="star-health-agent",
-                room=room_name,
-                metadata=metadata,
-            )
-        )
-        logger.info(f"✅ Agent dispatched to room {room_name}")
-        logger.info("🎉 Call initiated! The agent will connect shortly.")
+        logger.info("🎉 Call initiated! The SIP trunk will dial the customer, and the agent will join automatically.")
 
     except Exception as e:
         logger.error(f"❌ Failed to dispatch call: {e}", exc_info=True)
