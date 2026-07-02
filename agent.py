@@ -179,6 +179,30 @@ class StarHealthAgent(Agent):
             logger.debug("History pruned to %d items", len(chat_ctx.items))
         return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
 
+    async def transcription_node(
+        self, text, model_settings
+    ):
+        """
+        Sanitise LLM output before it reaches Sarvam TTS.
+
+        Even though the system prompt forbids markdown, the LLM occasionally
+        emits stray * ** # or numbered-list markers. These characters are read
+        aloud verbatim by TTS ("star", "hash", "one dot") and ruin prosody.
+        Strip them here so TTS always receives clean conversational text.
+        """
+        import re
+        _MARKDOWN_RE = re.compile(
+            r"\*{1,2}|#{1,6}\s?|\d+\.\s|^[-•]\s", re.MULTILINE
+        )
+
+        async def _clean(stream):
+            async for chunk in stream:
+                if isinstance(chunk, str):
+                    yield _MARKDOWN_RE.sub("", chunk)
+                else:
+                    yield chunk  # TimedString passthrough
+
+        return _clean(Agent.default.transcription_node(self, text, model_settings))
 
 
 async def entrypoint(ctx: JobContext):
@@ -248,13 +272,15 @@ async def entrypoint(ctx: JobContext):
             language=config.DEEPGRAM_STT_LANGUAGE,
             smart_format=True,
             interim_results=True,
-            endpointing_ms=200,
+            endpointing_ms=100,     # VAD handles primary end-of-speech at 200ms;
+                                    # 100ms here avoids double-stacking to 400ms total
         ),
         llm=openai.LLM(
             base_url="https://api.groq.com/openai/v1",
             api_key=os.getenv("GROQ_API_KEY"),
             model=config.GROQ_MODEL,
             temperature=config.GROQ_TEMPERATURE,
+            max_completion_tokens=config.GROQ_MAX_TOKENS,
         ),
         tts=sarvam.TTS(
             model=config.SARVAM_MODEL,

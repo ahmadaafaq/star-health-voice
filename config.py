@@ -5,7 +5,9 @@ All model names, voice settings, and API defaults live here.
 
 # ─── LLM (Groq) ───────────────────────────────────────────────────────────────
 GROQ_MODEL = "llama-3.1-8b-instant"
-GROQ_TEMPERATURE = 0.6
+GROQ_TEMPERATURE = 0.5            # lower = shorter, more predictable voice replies
+GROQ_MAX_TOKENS = 150             # 1-2 sentences ≈ 40-80 tokens; cap prevents runaway generation
+                                  # and directly reduces TTFT + protects 14.4K TPM quota
 
 # ─── STT (Deepgram) ───────────────────────────────────────────────────────────
 DEEPGRAM_STT_MODEL = "nova-2-general"
