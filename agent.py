@@ -210,7 +210,8 @@ async def entrypoint(ctx: JobContext):
             model=config.DEEPGRAM_STT_MODEL,
             language=config.DEEPGRAM_STT_LANGUAGE,
             smart_format=True,
-            interim_results=False,   # final transcripts only — reduces noise & latency
+            interim_results=True,
+            endpointing_ms=200,
         ),
         llm=openai.LLM(
             base_url="https://api.groq.com/openai/v1",
