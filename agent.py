@@ -197,14 +197,62 @@ class StarHealthAgent(Agent):
         14,400 TPM free-tier limit and increasing TTFT.
 
         Strategy: keep last MAX_HISTORY_ITEMS items (6 ≈ 3 user+assistant pairs)
-        + the system prompt is always preserved by ChatContext.truncate().
-        This bounds context at ~850 tokens/turn regardless of call length.
+        + the system prompt is always preserved.
+        Ensures that matching tool calls and tool responses are kept together to prevent
+        API validation errors.
         """
-        MAX_HISTORY_ITEMS = 6   # 3 user+assistant pairs; system prompt added back automatically
-        chat_ctx = chat_ctx.copy()  # don't mutate the live context
-        if len(chat_ctx.items) > MAX_HISTORY_ITEMS:
-            chat_ctx.truncate(max_items=MAX_HISTORY_ITEMS)
-            logger.debug("History pruned to %d items", len(chat_ctx.items))
+        MAX_HISTORY_ITEMS = 6
+        
+        # Always keep system messages
+        system_messages = [m for m in chat_ctx.items if m.role == "system"]
+        conv_messages = [m for m in chat_ctx.items if m.role != "system"]
+        
+        if len(conv_messages) > MAX_HISTORY_ITEMS:
+            sliced = conv_messages[-MAX_HISTORY_ITEMS:]
+            
+            # Find all tool call IDs from assistant messages in the slice
+            call_ids_in_slice = set()
+            for m in sliced:
+                if m.role == "assistant" and m.tool_calls:
+                    for tc in m.tool_calls:
+                        if hasattr(tc, "id") and tc.id:
+                            call_ids_in_slice.add(tc.id)
+            
+            # Filter to ensure we don't have dangling tool calls or responses
+            final_conv = []
+            for m in sliced:
+                if m.role == "tool":
+                    tid = getattr(m, "tool_call_id", "")
+                    if tid in call_ids_in_slice:
+                        final_conv.append(m)
+                    else:
+                        logger.info("Pruning dangling tool response message (call was truncated): %s", tid)
+                elif m.role == "assistant" and m.tool_calls:
+                    # Keep assistant tool call only if the corresponding tool response is also in the slice
+                    all_responded = True
+                    for tc in m.tool_calls:
+                        tc_id = getattr(tc, "id", "")
+                        has_resp = any(
+                            getattr(rm, "tool_call_id", "") == tc_id
+                            for rm in sliced if rm.role == "tool"
+                        )
+                        if not has_resp:
+                            all_responded = False
+                            break
+                    if all_responded:
+                        final_conv.append(m)
+                    else:
+                        logger.info("Pruning tool call assistant message (response was truncated): %s", [getattr(tc, "id", "") for tc in m.tool_calls])
+                else:
+                    final_conv.append(m)
+            
+            # Rebuild ChatContext
+            pruned_ctx = ChatContext()
+            pruned_ctx.items.extend(system_messages)
+            pruned_ctx.items.extend(final_conv)
+            chat_ctx = pruned_ctx
+            logger.debug("History safely pruned to %d items", len(chat_ctx.items))
+            
         return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
 
     async def transcription_node(

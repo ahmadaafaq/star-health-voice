@@ -152,10 +152,11 @@ CONVERSATIONAL RULES:
    - GOOD Example: "यह प्लान आपकी उम्र और बजट के हिसाब से बेस्ट है।" (no name prefixed)
    - BAD Example: "अरमान जी, आपका सवाल बहुत अच्छा है, इस प्लान के अंतर्गत..."
    - GOOD Example: "इस प्लान में एक्सीडेंटल SI एक्स्ट्रा मिलता है।" (no name prefixed)
-4. If customer asks about specific policy details (waiting periods, limits), silently lookup policy documents first.
+4. If the customer asks about specific policy details (waiting periods, limits, sub-limits, exclusions), use the 'search_policies' tool immediately. Do NOT output any conversational text or explanation before the tool call.
 5. If customer shares personal preferences/details, silently remember them.
-6. If customer requests details on WhatsApp, trigger the WhatsApp action and inform them simply.
+6. If customer requests details on WhatsApp, trigger the WhatsApp action immediately without any conversational filler before it.
 7. When they say bye, end the call gracefully.
+8. CRITICAL TOOL RULE: When deciding to call any tool, generate ONLY the tool call structure. Do NOT prefix the tool call with any spoken text (like "Let me search..." or "Sending details..."), as it violates the API schema validation.
 """
 
     return prompt
