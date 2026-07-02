@@ -71,13 +71,14 @@ class StarHealthAgent(Agent):
     - Uses function tools for memory, policy RAG, and WhatsApp.
     """
 
-    def __init__(self, *, chat_ctx: ChatContext, lead: dict, memories: list) -> None:
+    def __init__(self, *, chat_ctx: ChatContext, lead: dict, memories: list, is_voip: bool = False) -> None:
         super().__init__(
             chat_ctx=chat_ctx,
             instructions=build_system_prompt(lead, memories),
         )
         self._lead = lead
         self._memories = memories
+        self._is_voip = is_voip
 
     async def on_enter(self) -> None:
         """Generate the opening greeting as soon as the agent joins the room."""
@@ -87,15 +88,26 @@ class StarHealthAgent(Agent):
         salutation = "Sir" if gender == "male" else "Ma'am" if gender == "female" else "Sir or Ma'am"
         recommended_plan = self._lead.get("recommended_plan") or self._lead.get("recommendedPlan", "")
 
-        greeting_instruction = (
-            f"Greet the customer warmly. Their name is {name or 'unknown'}. "
-            f"Address them as {first_name or salutation}. "
-            f"Say you are Priya from Star Health Insurance. "
-            f"Mention you are calling about their health insurance assessment "
-            f"{'and their interest in the ' + recommended_plan + ' plan' if recommended_plan else ''}. "
-            f"Ask if this is a good time to talk. Keep it to 2 sentences maximum. "
-            f"Never address them as bhaiya, didi, or other colloquial terms; only use Sir/Ma'am or their name."
-        )
+        if self._is_voip:
+            greeting_instruction = (
+                f"Greet the customer warmly since they initiated this browser call to speak with you. "
+                f"Address them as {first_name or salutation}. "
+                f"Say you are Priya from Star Health Insurance. "
+                f"Say you are here to help them with their health insurance assessment "
+                f"{'and answer any questions about the ' + recommended_plan + ' plan' if recommended_plan else ''}. "
+                f"Ask how you can help them today. Keep it to 2 sentences maximum. "
+                f"Never address them as bhaiya, didi, or other colloquial terms; only use Sir/Ma'am or their name."
+            )
+        else:
+            greeting_instruction = (
+                f"Greet the customer warmly on this outbound call. Their name is {name or 'unknown'}. "
+                f"Address them as {first_name or salutation}. "
+                f"Say you are Priya from Star Health Insurance. "
+                f"Mention you are calling about their health insurance assessment "
+                f"{'and their interest in the ' + recommended_plan + ' plan' if recommended_plan else ''}. "
+                f"Ask if this is a good time to talk. Keep it to 2 sentences maximum. "
+                f"Never address them as bhaiya, didi, or other colloquial terms; only use Sir/Ma'am or their name."
+            )
 
         await self.session.generate_reply(instructions=greeting_instruction)
 
@@ -184,8 +196,8 @@ async def entrypoint(ctx: JobContext):
     # ── Build chat context (system prompt injected here) ───────────────────────
     chat_ctx = ChatContext()
 
-    # ── Create the agent ───────────────────────────────────────────────────────
-    agent = StarHealthAgent(chat_ctx=chat_ctx, lead=lead, memories=memories)
+    is_voip = ctx.room.name.startswith("browser-room-")
+    agent = StarHealthAgent(chat_ctx=chat_ctx, lead=lead, memories=memories, is_voip=is_voip)
 
     # ── Configure the session ──────────────────────────────────────────────────
     vad = ctx.proc.userdata.get("vad") or silero.VAD.load(
