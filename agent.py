@@ -220,7 +220,13 @@ class StarHealthAgent(Agent):
         async def _clean(stream):
             async for chunk in stream:
                 if isinstance(chunk, str):
-                    yield _MARKDOWN_RE.sub("", chunk)
+                    # Remove markdown
+                    cleaned = _MARKDOWN_RE.sub("", chunk)
+                    # Strip any words containing underscores (e.g. tool names or variable names like search_policies)
+                    cleaned = re.sub(r"\S*_\S*", "", cleaned)
+                    # Strip backticks
+                    cleaned = cleaned.replace("`", "")
+                    yield cleaned
                 else:
                     yield chunk  # TimedString passthrough
 
