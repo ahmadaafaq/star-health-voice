@@ -81,7 +81,8 @@ def build_system_prompt(lead: dict, memories: list) -> str:
     """
     # ── Customer profile ────────────────────────────────────────────────────────
     name = lead.get("name", "the customer")
-    first_name = name.split()[0] if name and name != "the customer" else ""
+    first_name_raw = name.split()[0] if name and name != "the customer" else ""
+    first_name = config.COMMON_NAMES_MAP.get(first_name_raw, first_name_raw)
     age = lead.get("age", "unknown")
     city = lead.get("city", "unknown")
     gender = lead.get("gender", "").strip().lower()

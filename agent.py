@@ -91,7 +91,8 @@ class StarHealthAgent(Agent):
     async def on_enter(self) -> None:
         """Generate the opening greeting as soon as the agent joins the room."""
         name = self._lead.get("name", "")
-        first_name = name.split()[0] if name else ""
+        first_name_raw = name.split()[0] if name else ""
+        first_name = config.COMMON_NAMES_MAP.get(first_name_raw, first_name_raw)
         gender = self._lead.get("gender", "").strip().lower()
         salutation = "Sir" if gender == "male" else "Ma'am" if gender == "female" else "Sir or Ma'am"
         recommended_plan = (

@@ -68,3 +68,28 @@ PLAN_NAME_MAP = {
     "super-star": "सुपर स्टार",
     "star-comprehensive": "स्टार कॉम्प्रीहेंसिव"
 }
+
+# ─── Common Names Devanagari Phonetics Map ──────────────────────────────────────
+# Translates English names to Devanagari in python before passing to LLM to prevent TTS pronunciation distortion
+COMMON_NAMES_MAP = {
+    "Aditya": "आदित्य",
+    "aditya": "आदित्य",
+    "Naman": "नमन",
+    "naman": "नमन",
+    "Arman": "अरमान",
+    "arman": "अरमान",
+    "Arjun": "अर्जुन",
+    "arjun": "अर्जुन",
+    "Priya": "प्रिया",
+    "priya": "प्रिया",
+    "Shreya": "श्रेया",
+    "shreya": "श्रेया",
+    "Manisha": "मनीषा",
+    "manisha": "मनीषा",
+    "Amit": "अमित",
+    "amit": "अमित",
+    "Vidya": "विद्या",
+    "vidya": "विद्या",
+    "Anushka": "अनुष्का",
+    "anushka": "अनुष्का"
+}
