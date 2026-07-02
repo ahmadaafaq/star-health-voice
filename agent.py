@@ -155,9 +155,31 @@ class StarHealthAgent(Agent):
                     yield ev.frame
             finally:
                 await aio.cancel_and_wait(forward_task)
+    async def llm_node(
+        self,
+        chat_ctx,
+        tools,
+        model_settings,
+    ):
+        """
+        Prune conversation history before each LLM call to cap token usage.
+
+        LiveKit accumulates every turn in chat_ctx. Without pruning, a 20-turn
+        call sends ~2,400 tokens of history every turn — eating into the
+        14,400 TPM free-tier limit and increasing TTFT.
+
+        Strategy: keep last MAX_HISTORY_ITEMS items (14 ≈ 7 user+assistant pairs)
+        + the system prompt is always preserved by ChatContext.truncate().
+        This bounds context at ~1,100 tokens/turn regardless of call length.
+        """
+        MAX_HISTORY_ITEMS = 14   # 7 user+assistant pairs; system prompt added back automatically
+        chat_ctx = chat_ctx.copy()  # don't mutate the live context
+        if len(chat_ctx.items) > MAX_HISTORY_ITEMS:
+            chat_ctx.truncate(max_items=MAX_HISTORY_ITEMS)
+            logger.debug("History pruned to %d items", len(chat_ctx.items))
+        return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
 
 
-# ─── Entrypoint — called for every new call/room ─────────────────────────────
 
 async def entrypoint(ctx: JobContext):
     """
@@ -281,29 +303,14 @@ async def entrypoint(ctx: JobContext):
 
             logger.info(f"Call Transcript:\n{transcript}")
 
-            # Call Groq to generate summary & score
-            prompt = f"""You are an expert health insurance lead conversion analyst.
-Analyze the following transcript of a phone conversation between Priya (our Star Health Advisor) and the customer:
-
-TRANSCRIPT:
-{transcript}
-
-Tasks:
-1. Summarize the key discussion points, customer requirements, and concerns (under 2-3 sentences).
-2. Evaluate their likelihood to purchase a plan on a scale of 0 to 100.
-3. Determine lead category:
-   - 'hot' (Score >= 80): High intent, e.g., wants to buy, requested follow-up to buy, scheduling payment.
-   - 'warm' (Score 40-79): Moderate intent, e.g., asked questions, interested but needs time, scheduled a general callback.
-   - 'cold' (Score < 40): Low intent, e.g., hung up early, not interested, rejected the policy.
-4. Provide a brief explanation of the score.
-
-Return ONLY a raw JSON object (no markdown, no surrounding text):
-{{
-  "summary": "...",
-  "score": 85,
-  "type": "hot",
-  "rationale": "Explanation based on the conversation."
-}}"""
+            # Compact post-call analysis prompt (fewer tokens = faster, cheaper)
+            prompt = (
+                f"Analyze this insurance sales call. Return ONLY raw JSON, no markdown.\n\n"
+                f"TRANSCRIPT:\n{transcript}\n\n"
+                "Return: {\"summary\": \"2-sentence key points\", \"score\": 0-100, "
+                "\"type\": \"hot|warm|cold\", \"rationale\": \"1 sentence why\"}\n"
+                "hot=score>=80 (buying intent), warm=40-79 (interested), cold<40 (disinterested)"
+            )
 
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(
