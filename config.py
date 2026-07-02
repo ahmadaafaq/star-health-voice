@@ -4,7 +4,7 @@ All model names, voice settings, and API defaults live here.
 """
 
 # ─── LLM (Groq) ───────────────────────────────────────────────────────────────
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "llama-3.1-8b-instant"
 GROQ_TEMPERATURE = 0.6
 
 # ─── STT (Deepgram) ───────────────────────────────────────────────────────────
@@ -18,7 +18,7 @@ SARVAM_LANGUAGE = "hi-IN"         # Synthesizes Hindi/Hinglish speech
 
 # ─── VAD (Silero) ─────────────────────────────────────────────────────────────
 # Lower min_silence_duration = faster response but may interrupt the user
-VAD_MIN_SILENCE_DURATION = 0.4   # seconds (400 ms)
+VAD_MIN_SILENCE_DURATION = 0.2   # seconds (200 ms)
 VAD_ACTIVATION_THRESHOLD = 0.5
 
 # ─── Star Health Plans (compact reference — injected into system prompt) ──────
