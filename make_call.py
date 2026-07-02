@@ -32,6 +32,18 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("make-call")
 
 
+def normalize_phone_number(phone: str) -> str:
+    """Normalize phone number to strict E.164 format (+91XXXXXXXXXX) for SIP routing."""
+    cleaned = "".join(c for c in phone if c.isdigit() or c == "+")
+    if cleaned.startswith("+"):
+        return cleaned
+    if len(cleaned) == 10:
+        return "+91" + cleaned
+    if len(cleaned) == 11 and cleaned.startswith("0"):
+        return "+91" + cleaned[1:]
+    return "+" + cleaned
+
+
 async def dispatch_call(phone_number: str = None, lead_id: str = None):
     """
     Dispatch an outbound SIP call.
@@ -51,6 +63,9 @@ async def dispatch_call(phone_number: str = None, lead_id: str = None):
             logger.error(f"❌ Error: Lead {lead_id} does not have a valid phone number in Supabase")
             return
         logger.info(f"✅ Found phone number: {phone_number}")
+
+    # Normalize to E.164 format (+91...) for SIP trunk compat
+    phone_number = normalize_phone_number(phone_number)
 
     livekit_url = os.getenv("LIVEKIT_URL")
     api_key = os.getenv("LIVEKIT_API_KEY")
