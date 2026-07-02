@@ -1,7 +1,7 @@
 import os
 
 # ─── LLM (Groq) ───────────────────────────────────────────────────────────────
-GROQ_MODEL = "llama-3.3-70b-specdec"   # Same 70b quality as versatile, 2-3x faster TTFT via speculative decoding (paid plan)
+GROQ_MODEL = "llama-3.3-70b-versatile"   # Specdec is decommissioned; using the standard versatile model for high quality.
 GROQ_TEMPERATURE = 0.4            # lower = shorter, more predictable voice replies
 GROQ_MAX_TOKENS = 100             # 1-2 sentences ≈ 40-80 tokens; cap prevents runaway generation
 
