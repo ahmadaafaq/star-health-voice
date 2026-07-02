@@ -29,7 +29,7 @@ VAD_ACTIVATION_THRESHOLD = 0.5
 
 # ─── Star Health Plans (compact reference — injected into system prompt) ──────
 STAR_HEALTH_PLANS_COMPACT = """
-Plans summary (call search_policies for details):
+Plans summary:
 - Arogya Sanjeevani: Entry-level standard policy, starting at 799 Rupees per month, 5 Lakh to 2 Crore Rupees coverage.
 - Family Health Optima: Floater with restoration benefit, starting at 1,199 Rupees per month, 5 Lakh to 25 Lakh Rupees coverage.
 - Medi Classic: Individual classic health cover, starting at 899 Rupees per month, 5 Lakh to 15 Lakh Rupees coverage.
