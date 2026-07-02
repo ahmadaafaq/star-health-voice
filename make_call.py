@@ -94,7 +94,6 @@ async def dispatch_call(phone_number: str = None, lead_id: str = None):
             )
         )
         logger.info(f"✅ SIP participant created: {sip_participant.participant_id}")
-        logger.info(f"   Status: {sip_participant.sip_call_status}")
 
         # Dispatch the agent to handle the room
         await lk_api.agent.create_agent_dispatch(
