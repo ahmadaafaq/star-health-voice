@@ -1,9 +1,9 @@
 """
 Star Health Insurance Voice Agent
 ──────────────────────────────────
-Stack: LiveKit Cloud · Deepgram STT (Nova-2) · Groq LLM (llama-3.3-70b) · Sarvam TTS (Anushka)
+Stack: LiveKit Cloud · Deepgram STT (Nova-2) · Groq LLM (llama-3.1-8b-instant) · Sarvam TTS (Anushka)
 Memory: Supabase agent_memories table (persistent across calls)
-RAG: star-health-rag /api/search via search_policies tool (on-demand only)
+RAG: In-process FAISS search (all-mpnet-base-v2, prewarmed) — HTTP fallback via star-health-rag
 
 Usage:
     python agent.py dev       # local console test (no SIP)
@@ -38,7 +38,8 @@ from livekit.plugins import deepgram, openai, silero, sarvam
 import config
 from context_loader import preload_lead, build_system_prompt
 from tools.memory import remember_detail, recall_detail, search_memories
-from tools.policy_rag import search_policies
+from tools.phrase_tokenizer import PhraseTokenizer
+from tools.policy_rag import search_policies, prewarm_policy_index
 from tools.whatsapp import send_whatsapp_details
 
 load_dotenv(".env")
@@ -52,13 +53,17 @@ logger = logging.getLogger("star-health-agent")
 # ─── Pre-warm: load Silero VAD model once per worker process ──────────────────
 
 def prewarm(proc: JobProcess):
-    """Load heavy models once when the worker starts, not per-call."""
+    """Load heavy models ONCE when the worker process starts — never per-call."""
+    # 1. Silero VAD (used for end-of-speech detection)
     logger.info("Prewarming Silero VAD model...")
     proc.userdata["vad"] = silero.VAD.load(
         min_silence_duration=config.VAD_MIN_SILENCE_DURATION,
         activation_threshold=config.VAD_ACTIVATION_THRESHOLD,
     )
     logger.info("Silero VAD loaded.")
+
+    # 2. Policy search: SentenceTransformer + FAISS index (in-process, zero HTTP)
+    prewarm_policy_index()
 
 
 # ─── Agent class ─────────────────────────────────────────────────────────────
@@ -71,13 +76,14 @@ class StarHealthAgent(Agent):
     - Uses function tools for memory, policy RAG, and WhatsApp.
     """
 
-    def __init__(self, *, chat_ctx: ChatContext, lead: dict, memories: list) -> None:
+    def __init__(self, *, chat_ctx: ChatContext, lead: dict, memories: list, is_voip: bool = False) -> None:
         super().__init__(
             chat_ctx=chat_ctx,
             instructions=build_system_prompt(lead, memories),
         )
         self._lead = lead
         self._memories = memories
+        self._is_voip = is_voip
 
     async def on_enter(self) -> None:
         """Generate the opening greeting as soon as the agent joins the room."""
@@ -87,15 +93,26 @@ class StarHealthAgent(Agent):
         salutation = "Sir" if gender == "male" else "Ma'am" if gender == "female" else "Sir or Ma'am"
         recommended_plan = self._lead.get("recommended_plan") or self._lead.get("recommendedPlan", "")
 
-        greeting_instruction = (
-            f"Greet the customer warmly. Their name is {name or 'unknown'}. "
-            f"Address them as {first_name or salutation}. "
-            f"Say you are Priya from Star Health Insurance. "
-            f"Mention you are calling about their health insurance assessment "
-            f"{'and their interest in the ' + recommended_plan + ' plan' if recommended_plan else ''}. "
-            f"Ask if this is a good time to talk. Keep it to 2 sentences maximum. "
-            f"Never address them as bhaiya, didi, or other colloquial terms; only use Sir/Ma'am or their name."
-        )
+        if self._is_voip:
+            greeting_instruction = (
+                f"Greet the customer warmly since they initiated this browser call to speak with you. "
+                f"Address them as {first_name or salutation}. "
+                f"Say you are Priya from Star Health Insurance. "
+                f"Say you are here to help them with their health insurance assessment "
+                f"{'and answer any questions about the ' + recommended_plan + ' plan' if recommended_plan else ''}. "
+                f"Ask how you can help them today. Keep it to 2 sentences maximum. "
+                f"Never address them as bhaiya, didi, or other colloquial terms; only use Sir/Ma'am or their name."
+            )
+        else:
+            greeting_instruction = (
+                f"Greet the customer warmly on this outbound call. Their name is {name or 'unknown'}. "
+                f"Address them as {first_name or salutation}. "
+                f"Say you are Priya from Star Health Insurance. "
+                f"Mention you are calling about their health insurance assessment "
+                f"{'and their interest in the ' + recommended_plan + ' plan' if recommended_plan else ''}. "
+                f"Ask if this is a good time to talk. Keep it to 2 sentences maximum. "
+                f"Never address them as bhaiya, didi, or other colloquial terms; only use Sir/Ma'am or their name."
+            )
 
         await self.session.generate_reply(instructions=greeting_instruction)
 
@@ -103,16 +120,26 @@ class StarHealthAgent(Agent):
         self, text: AsyncIterable[str], model_settings: Any
     ):
         """
-        Forces sentence-level buffering before sending text to the Sarvam Bulbul TTS.
-        Without this, text streams token-by-token (word-by-word) to Sarvam's API,
-        ruining natural prosody, breaking words, and increasing roundtrip latency.
+        Phrase-level TTS buffering for Sarvam Bulbul.
+
+        Flushes text to TTS synthesis at:
+          - Hard sentence boundaries  → . ! ? । ॥    (flush immediately)
+          - Soft clause boundaries    → , ; :          (flush after 5+ words)
+          - Force flush               → every 12 words (no punctuation fallback)
+
+        This starts Sarvam synthesis on the first phrase while the LLM is still
+        generating the remainder, overlapping LLM and TTS work and delivering
+        first audio ~200–350ms sooner than sentence-level buffering.
         """
-        from livekit.agents import tts, tokenize
+        from livekit.agents import tts
         from livekit.agents.utils import aio
 
         wrapped_tts = tts.StreamAdapter(
             tts=self.session.tts,
-            sentence_tokenizer=tokenize.basic.SentenceTokenizer(),
+            sentence_tokenizer=PhraseTokenizer(
+                min_words_soft=5,   # flush at comma/colon after 5+ words
+                max_words=12,       # force flush if no punctuation in 12 words
+            ),
         )
 
         conn_options = self.session.conn_options.tts_conn_options
@@ -128,9 +155,55 @@ class StarHealthAgent(Agent):
                     yield ev.frame
             finally:
                 await aio.cancel_and_wait(forward_task)
+    async def llm_node(
+        self,
+        chat_ctx,
+        tools,
+        model_settings,
+    ):
+        """
+        Prune conversation history before each LLM call to cap token usage.
 
+        LiveKit accumulates every turn in chat_ctx. Without pruning, a 20-turn
+        call sends ~2,400 tokens of history every turn — eating into the
+        14,400 TPM free-tier limit and increasing TTFT.
 
-# ─── Entrypoint — called for every new call/room ─────────────────────────────
+        Strategy: keep last MAX_HISTORY_ITEMS items (14 ≈ 7 user+assistant pairs)
+        + the system prompt is always preserved by ChatContext.truncate().
+        This bounds context at ~1,100 tokens/turn regardless of call length.
+        """
+        MAX_HISTORY_ITEMS = 14   # 7 user+assistant pairs; system prompt added back automatically
+        chat_ctx = chat_ctx.copy()  # don't mutate the live context
+        if len(chat_ctx.items) > MAX_HISTORY_ITEMS:
+            chat_ctx.truncate(max_items=MAX_HISTORY_ITEMS)
+            logger.debug("History pruned to %d items", len(chat_ctx.items))
+        return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
+
+    async def transcription_node(
+        self, text, model_settings
+    ):
+        """
+        Sanitise LLM output before it reaches Sarvam TTS.
+
+        Even though the system prompt forbids markdown, the LLM occasionally
+        emits stray * ** # or numbered-list markers. These characters are read
+        aloud verbatim by TTS ("star", "hash", "one dot") and ruin prosody.
+        Strip them here so TTS always receives clean conversational text.
+        """
+        import re
+        _MARKDOWN_RE = re.compile(
+            r"\*{1,2}|#{1,6}\s?|\d+\.\s|^[-•]\s", re.MULTILINE
+        )
+
+        async def _clean(stream):
+            async for chunk in stream:
+                if isinstance(chunk, str):
+                    yield _MARKDOWN_RE.sub("", chunk)
+                else:
+                    yield chunk  # TimedString passthrough
+
+        return _clean(Agent.default.transcription_node(self, text, model_settings))
+
 
 async def entrypoint(ctx: JobContext):
     """
@@ -184,8 +257,8 @@ async def entrypoint(ctx: JobContext):
     # ── Build chat context (system prompt injected here) ───────────────────────
     chat_ctx = ChatContext()
 
-    # ── Create the agent ───────────────────────────────────────────────────────
-    agent = StarHealthAgent(chat_ctx=chat_ctx, lead=lead, memories=memories)
+    is_voip = ctx.room.name.startswith("browser-room-")
+    agent = StarHealthAgent(chat_ctx=chat_ctx, lead=lead, memories=memories, is_voip=is_voip)
 
     # ── Configure the session ──────────────────────────────────────────────────
     vad = ctx.proc.userdata.get("vad") or silero.VAD.load(
@@ -198,13 +271,16 @@ async def entrypoint(ctx: JobContext):
             model=config.DEEPGRAM_STT_MODEL,
             language=config.DEEPGRAM_STT_LANGUAGE,
             smart_format=True,
-            interim_results=False,   # final transcripts only — reduces noise & latency
+            interim_results=True,
+            endpointing_ms=100,     # VAD handles primary end-of-speech at 200ms;
+                                    # 100ms here avoids double-stacking to 400ms total
         ),
         llm=openai.LLM(
             base_url="https://api.groq.com/openai/v1",
             api_key=os.getenv("GROQ_API_KEY"),
             model=config.GROQ_MODEL,
             temperature=config.GROQ_TEMPERATURE,
+            max_completion_tokens=config.GROQ_MAX_TOKENS,
         ),
         tts=sarvam.TTS(
             model=config.SARVAM_MODEL,
@@ -253,29 +329,14 @@ async def entrypoint(ctx: JobContext):
 
             logger.info(f"Call Transcript:\n{transcript}")
 
-            # Call Groq to generate summary & score
-            prompt = f"""You are an expert health insurance lead conversion analyst.
-Analyze the following transcript of a phone conversation between Priya (our Star Health Advisor) and the customer:
-
-TRANSCRIPT:
-{transcript}
-
-Tasks:
-1. Summarize the key discussion points, customer requirements, and concerns (under 2-3 sentences).
-2. Evaluate their likelihood to purchase a plan on a scale of 0 to 100.
-3. Determine lead category:
-   - 'hot' (Score >= 80): High intent, e.g., wants to buy, requested follow-up to buy, scheduling payment.
-   - 'warm' (Score 40-79): Moderate intent, e.g., asked questions, interested but needs time, scheduled a general callback.
-   - 'cold' (Score < 40): Low intent, e.g., hung up early, not interested, rejected the policy.
-4. Provide a brief explanation of the score.
-
-Return ONLY a raw JSON object (no markdown, no surrounding text):
-{{
-  "summary": "...",
-  "score": 85,
-  "type": "hot",
-  "rationale": "Explanation based on the conversation."
-}}"""
+            # Compact post-call analysis prompt (fewer tokens = faster, cheaper)
+            prompt = (
+                f"Analyze this insurance sales call. Return ONLY raw JSON, no markdown.\n\n"
+                f"TRANSCRIPT:\n{transcript}\n\n"
+                "Return: {\"summary\": \"2-sentence key points\", \"score\": 0-100, "
+                "\"type\": \"hot|warm|cold\", \"rationale\": \"1 sentence why\"}\n"
+                "hot=score>=80 (buying intent), warm=40-79 (interested), cold<40 (disinterested)"
+            )
 
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(

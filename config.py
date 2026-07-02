@@ -4,8 +4,10 @@ All model names, voice settings, and API defaults live here.
 """
 
 # ─── LLM (Groq) ───────────────────────────────────────────────────────────────
-GROQ_MODEL = "llama-3.3-70b-versatile"
-GROQ_TEMPERATURE = 0.6
+GROQ_MODEL = "llama-3.1-8b-instant"
+GROQ_TEMPERATURE = 0.5            # lower = shorter, more predictable voice replies
+GROQ_MAX_TOKENS = 150             # 1-2 sentences ≈ 40-80 tokens; cap prevents runaway generation
+                                  # and directly reduces TTFT + protects 14.4K TPM quota
 
 # ─── STT (Deepgram) ───────────────────────────────────────────────────────────
 DEEPGRAM_STT_MODEL = "nova-2-general"
@@ -18,7 +20,7 @@ SARVAM_LANGUAGE = "hi-IN"         # Synthesizes Hindi/Hinglish speech
 
 # ─── VAD (Silero) ─────────────────────────────────────────────────────────────
 # Lower min_silence_duration = faster response but may interrupt the user
-VAD_MIN_SILENCE_DURATION = 0.4   # seconds (400 ms)
+VAD_MIN_SILENCE_DURATION = 0.2   # seconds (200 ms)
 VAD_ACTIVATION_THRESHOLD = 0.5
 
 # ─── Star Health Plans (compact reference — injected into system prompt) ──────
