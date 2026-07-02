@@ -39,3 +39,21 @@ Plans summary (call search_policies for details):
 # ─── Agent persona ─────────────────────────────────────────────────────────────
 AGENT_NAME = "Priya"
 AGENT_ROLE = "Star Health Insurance digital advisor"
+
+# ─── Plan name Devanagari Phonetics Map ──────────────────────────────────────────
+# Used so that the Hindi TTS engine pronounces plan names correctly instead of spelling them out
+PLAN_NAME_MAP = {
+    "Family Health Optima": "फैमिली हेल्थ ऑप्टिमा",
+    "Arogya Sanjeevani": "आरोग्य संजीवनी",
+    "Medi Classic": "मेडी क्लासिक",
+    "Medi Classic Individual": "मेडी क्लासिक",
+    "Star Health Assure": "स्टार हेल्थ एश्योर",
+    "Star Premier": "स्टार हेल्थ प्रीमियर",
+    "Star Health Premier": "स्टार हेल्थ प्रीमियर",
+    "Young Star": "यंग स्टार",
+    "Young Star Insurance": "यंग स्टार",
+    "Super Star": "सुपर स्टार",
+    "Star Comprehensive": "स्टार कॉम्प्रीहेंसिव",
+    "Star Comprehensive Insurance Policy": "स्टार कॉम्प्रीहेंसिव",
+    "Star Health": "स्टार हेल्थ"
+}

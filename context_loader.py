@@ -81,6 +81,7 @@ def build_system_prompt(lead: dict, memories: list) -> str:
     """
     # ── Customer profile ────────────────────────────────────────────────────────
     name = lead.get("name", "the customer")
+    first_name = name.split()[0] if name and name != "the customer" else ""
     age = lead.get("age", "unknown")
     city = lead.get("city", "unknown")
     gender = lead.get("gender", "").strip().lower()
@@ -97,6 +98,7 @@ def build_system_prompt(lead: dict, memories: list) -> str:
     else:
         pre_existing_str = str(pre_existing)
     recommended_plan = lead.get("recommended_plan") or lead.get("recommendedPlan", "")
+    plan_hi = config.PLAN_NAME_MAP.get(recommended_plan, recommended_plan)
     phone = lead.get("phone", "")
 
     # ── Why this plan ───────────────────────────────────────────────────────────
@@ -108,21 +110,29 @@ def build_system_prompt(lead: dict, memories: list) -> str:
         memory_lines = [f"- {m['memory_type']}: {m['content']}" for m in memories]
         memories_text = "\nPAST CALL NOTES (what you already know about this customer):\n" + "\n".join(memory_lines)
 
+    # Build plan name mapping table for LLM prompt context
+    plan_map_text = "\n".join([f"- {eng} -> {hi}" for eng, hi in config.PLAN_NAME_MAP.items()])
+
     prompt = f"""You are {config.AGENT_NAME}, a warm and professional Star Health Insurance advisor. Speak in Hinglish.
 
 LANGUAGE RULES:
-- Write all Hindi words in Devanagari script (e.g. नमस्ते, क्या आप, बात कर रही हूँ).
-- Write all English terms, names of plans, or insurance concepts in English/Latin script (e.g. "Star Health Insurance", "waiting period", "maternity benefit", "WhatsApp").
-- Write the customer's name phonetically in Devanagari script in the sentence so that the Hindi TTS engine pronounces it correctly.
-  Examples of script style:
-  1. "नमस्ते अमित, मैं Star Health से प्रिया बात कर रही हूँ। How can I help you today?"
-  2. "क्या आपके insurance को लेकर कोई questions हैं? मैं details share कर सकती हूँ।"
+1. Write all Hindi words in Devanagari script (e.g. नमस्ते, क्या आप, बात कर रही हूँ).
+2. Write all general English nouns/verbs in English/Latin script (e.g. "waiting period", "maternity benefit", "WhatsApp", "budget").
+3. CRITICAL: ALWAYS write policy/plan names phonetically in Devanagari script so they are pronounced correctly (e.g. write "फैमिली हेल्थ ऑप्टिमा" instead of "Family Health Optima"). Never write plan names in English letters, otherwise TTS will jumble them.
+4. Address the customer respectfully by their first name followed by 'जी' (written in Devanagari, e.g. "नमन जी" or "अरमान जी") on every single turn. Do NOT use generic "Sir" or "Ma'am" when you know their name.
+
+PLAN NAME PHONETIC MAP (Use these exact Devanagari spellings when mentioning plans):
+{plan_map_text}
+
+Examples of script style:
+1. "नमस्ते नमन जी, मैं Star Health से प्रिया बात कर रही हूँ। How can I help you today?"
+2. "नमन जी, आपके लिए फैमिली हेल्थ ऑप्टिमा plan best रहेगा। क्या मैं details share करूँ?"
 
 CUSTOMER PROFILE:
-- Name: {name} (Write as Devanagari in text: e.g. अमित for Amit, प्रिया for Priya, श्रेया for Shreya, etc.)
+- Name: {name} (First name: {first_name})
 - Age: {age} | City: {city} | Gender: {gender or 'unknown'}
 - Insuring: {members_str} | Budget: {budget} | Pre-existing: {pre_existing_str}
-- Recommended Plan: {recommended_plan or 'to be discussed'}
+- Recommended Plan: {plan_hi}
 - Why: {why_explanation}
 
 {config.STAR_HEALTH_PLANS_COMPACT}
@@ -130,8 +140,8 @@ CUSTOMER PROFILE:
 
 CONVERSATIONAL RULES:
 1. Speak in 1-2 short, simple sentences. Never use markdown, bullets, lists, or asterisks.
-2. Address the customer respectfully by name or as {salutation} (using Devanagari in text). Never use bhaiya, didi, or other colloquial terms.
-3. For policy specifics (waiting periods, room rent caps, exclusions), call `search_policies` silently first.
+2. Address the customer respectfully by name with 'जी' suffix (e.g., 'नमन जी') on every single turn.
+3. For policy specifics, call `search_policies` silently first.
 4. If customer shares personal preferences/details, call `remember_detail`.
 5. If customer requests details on WhatsApp, call `send_whatsapp_details` and inform them.
 6. When they say bye, end the call gracefully.

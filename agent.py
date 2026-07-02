@@ -95,6 +95,8 @@ class StarHealthAgent(Agent):
         gender = self._lead.get("gender", "").strip().lower()
         salutation = "Sir" if gender == "male" else "Ma'am" if gender == "female" else "Sir or Ma'am"
         recommended_plan = self._lead.get("recommended_plan") or self._lead.get("recommendedPlan", "")
+        plan_hi = config.PLAN_NAME_MAP.get(recommended_plan, recommended_plan) or "a plan tailored for you"
+        
         recommendation_reason = (
             self._lead.get("recommendation_reason")
             or self._lead.get("why_this_plan")
@@ -107,27 +109,30 @@ class StarHealthAgent(Agent):
             words = recommendation_reason.split()
             reason_snippet = " ".join(words[:12]) + ("…" if len(words) > 12 else "")
 
+        # Address with respectful "जी" suffix
+        address_name = f"{first_name} जी" if first_name else salutation
+
         if self._is_voip:
             greeting_instruction = (
                 f"Greet the customer in warm Hinglish (Hindi words in Devanagari + English terms). "
-                f"Write the customer's first name phonetically in Devanagari script (e.g. नमन for Naman, प्रिया for Priya). "
-                f"Say you are Priya from Star Health Insurance. "
-                f"Immediately mention their recommended plan: '{recommended_plan or 'a plan tailored for them'}'. "
+                f"Address the customer as '{address_name}' (use Devanagari script in text, e.g. नमन जी). "
+                f"Say you are Priya (प्रिया) from Star Health (स्टार हेल्थ) Insurance. "
+                f"Immediately mention their recommended plan: '{plan_hi}'. "
                 f"{('Briefly say why: ' + reason_snippet + '. ') if reason_snippet else ''}"
                 f"Then ask: 'क्या आप इसके बारे में जानना चाहेंगे?' (or similar). "
                 f"Keep it to exactly 2 natural spoken sentences. "
-                f"No markdown, no lists. Never use bhaiya, didi, or colloquial terms."
+                f"No markdown, no lists. Never use bhaiya, didi, or generic Sir/Ma'am."
             )
         else:
             greeting_instruction = (
                 f"Greet the customer in warm Hinglish on this outbound call. "
-                f"Write the customer's name phonetically in Devanagari script (e.g. नमन for Naman, प्रिया for Priya). "
-                f"Say you are Priya from Star Health Insurance. "
-                f"Mention their recommended plan: '{recommended_plan or 'a plan tailored for them'}' "
+                f"Address the customer as '{address_name}' (use Devanagari script in text, e.g. नमन जी). "
+                f"Say you are Priya (प्रिया) from Star Health (स्टार हेल्थ) Insurance. "
+                f"Immediately mention their recommended plan: '{plan_hi}' "
                 f"{('and briefly say why: ' + reason_snippet + '. ') if reason_snippet else ''}. "
                 f"Ask if this is a good time to talk. "
                 f"Keep it to exactly 2 natural spoken sentences. "
-                f"No markdown, no lists. Never use bhaiya, didi, or colloquial terms."
+                f"No markdown, no lists. Never use bhaiya, didi, or generic Sir/Ma'am."
             )
 
         await self.session.generate_reply(instructions=greeting_instruction)
