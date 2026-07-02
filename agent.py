@@ -208,7 +208,7 @@ class StarHealthAgent(Agent):
         MAX_HISTORY_ITEMS = 6
         
         # Always keep system messages
-        # Note: chat_ctx.items can contain AgentConfigUpdate objects which have no .role
+        # Note: chat_ctx.items can contain AgentConfigUpdate or other non-message objects
         from livekit.agents.llm import ChatMessage
         chat_messages = [m for m in chat_ctx.items if isinstance(m, ChatMessage)]
         system_messages = [m for m in chat_messages if m.role == "system"]
@@ -218,9 +218,10 @@ class StarHealthAgent(Agent):
             sliced = conv_messages[-MAX_HISTORY_ITEMS:]
             
             # Find all tool call IDs from assistant messages in the slice
+            # Use hasattr() to safely handle different ChatMessage subtypes
             call_ids_in_slice = set()
             for m in sliced:
-                if m.role == "assistant" and m.tool_calls:
+                if m.role == "assistant" and hasattr(m, "tool_calls") and m.tool_calls:
                     for tc in m.tool_calls:
                         if hasattr(tc, "id") and tc.id:
                             call_ids_in_slice.add(tc.id)
@@ -234,7 +235,7 @@ class StarHealthAgent(Agent):
                         final_conv.append(m)
                     else:
                         logger.info("Pruning dangling tool response message (call was truncated): %s", tid)
-                elif m.role == "assistant" and m.tool_calls:
+                elif m.role == "assistant" and hasattr(m, "tool_calls") and m.tool_calls:
                     # Keep assistant tool call only if the corresponding tool response is also in the slice
                     all_responded = True
                     for tc in m.tool_calls:
