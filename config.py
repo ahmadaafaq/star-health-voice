@@ -10,7 +10,7 @@ GROQ_MAX_TOKENS = 120             # 1-2 sentences ≈ 40-80 tokens; cap prevents
 DEEPGRAM_STT_MODEL = "nova-2-general"
 DEEPGRAM_STT_LANGUAGE = "hi"     # Hindi & Hinglish support (note: 'hi-en' is invalid in Deepgram and causes 400 errors)
 
-TTS_PROVIDER = "sarvam"            # Options: "sarvam" or "elevenlabs"
+TTS_PROVIDER = "elevenlabs"            # Options: "sarvam" or "elevenlabs"
 
 # ElevenLabs Settings
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
