@@ -43,6 +43,7 @@ AGENT_ROLE = "Star Health Insurance digital advisor"
 # ─── Plan name Devanagari Phonetics Map ──────────────────────────────────────────
 # Used so that the Hindi TTS engine pronounces plan names correctly instead of spelling them out
 PLAN_NAME_MAP = {
+    # Full Names
     "Family Health Optima": "फैमिली हेल्थ ऑप्टिमा",
     "Arogya Sanjeevani": "आरोग्य संजीवनी",
     "Medi Classic": "मेडी क्लासिक",
@@ -55,5 +56,15 @@ PLAN_NAME_MAP = {
     "Super Star": "सुपर स्टार",
     "Star Comprehensive": "स्टार कॉम्प्रीहेंसिव",
     "Star Comprehensive Insurance Policy": "स्टार कॉम्प्रीहेंसिव",
-    "Star Health": "स्टार हेल्थ"
+    "Star Health": "स्टार हेल्थ",
+    
+    # Supabase leads.recommended_plan_id keys
+    "family-health-optima": "फैमिली हेल्थ ऑप्टिमा",
+    "arogya-sanjeevani": "आरोग्य संजीवनी",
+    "medi-classic": "मेडी क्लासिक",
+    "star-assure": "स्टार हेल्थ एश्योर",
+    "star-premier": "स्टार हेल्थ प्रीमियर",
+    "young-star": "यंग स्टार",
+    "super-star": "सुपर स्टार",
+    "star-comprehensive": "स्टार कॉम्प्रीहेंसिव"
 }

@@ -94,7 +94,12 @@ class StarHealthAgent(Agent):
         first_name = name.split()[0] if name else ""
         gender = self._lead.get("gender", "").strip().lower()
         salutation = "Sir" if gender == "male" else "Ma'am" if gender == "female" else "Sir or Ma'am"
-        recommended_plan = self._lead.get("recommended_plan") or self._lead.get("recommendedPlan", "")
+        recommended_plan = (
+            self._lead.get("recommended_plan_id")
+            or self._lead.get("recommended_plan")
+            or self._lead.get("recommendedPlan")
+            or ""
+        )
         plan_hi = config.PLAN_NAME_MAP.get(recommended_plan, recommended_plan) or "a plan tailored for you"
         
         recommendation_reason = (

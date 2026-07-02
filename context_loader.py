@@ -97,7 +97,12 @@ def build_system_prompt(lead: dict, memories: list) -> str:
         pre_existing_str = ", ".join(pre_existing) if pre_existing else "none"
     else:
         pre_existing_str = str(pre_existing)
-    recommended_plan = lead.get("recommended_plan") or lead.get("recommendedPlan", "")
+    recommended_plan = (
+        lead.get("recommended_plan_id")
+        or lead.get("recommended_plan")
+        or lead.get("recommendedPlan")
+        or ""
+    )
     plan_hi = config.PLAN_NAME_MAP.get(recommended_plan, recommended_plan)
     phone = lead.get("phone", "")
 
@@ -140,12 +145,12 @@ CUSTOMER PROFILE:
 
 CONVERSATIONAL RULES:
 1. Speak in exactly 1-2 short, simple sentences. Go straight to the point.
-2. Address the customer respectfully. Alternate between using their first name + 'जी' and using 'सर'/'मैम'. Do not repeat names or salutations on every single turn.
+2. DO NOT address the customer by name or salutation on every single turn. Only prefix their name/salutation (like "नमन जी" or "सर"/"मैम") once in every 3-4 turns, or when switching to a completely new topic. On most turns, start speaking the answer directly.
 3. CRITICAL: NO INTRODUCTORY FLUFF OR FILLER PHRASES. Do not echo the customer's question or add polite padding. Start your sentence directly with the answer.
    - BAD Example: "नमन जी, मैं आपको बताना चाहती हूँ कि मैंने यह प्लान आपके लिए क्यों चुना..."
-   - GOOD Example: "नमन जी, यह प्लान आपकी उम्र और बजट के हिसाब से बेस्ट है।"
+   - GOOD Example: "यह प्लान आपकी उम्र और बजट के हिसाब से बेस्ट है।" (no name prefixed)
    - BAD Example: "अरमान जी, आपका सवाल बहुत अच्छा है, इस प्लान के अंतर्गत..."
-   - GOOD Example: "अरमान जी, इस प्लान में एक्सीडेंटल SI एक्स्ट्रा मिलता है।"
+   - GOOD Example: "इस प्लान में एक्सीडेंटल SI एक्स्ट्रा मिलता है।" (no name prefixed)
 4. If customer asks about specific policy details (waiting periods, limits), silently lookup policy documents first.
 5. If customer shares personal preferences/details, silently remember them.
 6. If customer requests details on WhatsApp, trigger the WhatsApp action and inform them simply.
