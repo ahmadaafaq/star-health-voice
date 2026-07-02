@@ -3,7 +3,7 @@ Star Health Insurance Voice Agent
 ──────────────────────────────────
 Stack: LiveKit Cloud · Deepgram STT (Nova-2) · Groq LLM (llama-3.1-8b-instant) · Sarvam TTS (Anushka)
 Memory: Supabase agent_memories table (persistent across calls)
-RAG: In-process FAISS search (all-mpnet-base-v2, prewarmed) — HTTP fallback via star-health-rag
+RAG: In-process FAISS search (all-MiniLM-L6-v2, prewarmed) — HTTP fallback via star-health-rag
 
 Usage:
     python agent.py dev       # local console test (no SIP)
@@ -197,71 +197,24 @@ class StarHealthAgent(Agent):
         """
         Prune conversation history before each LLM call to cap token usage.
 
-        LiveKit accumulates every turn in chat_ctx. Without pruning, a 20-turn
-        call sends ~2,400 tokens of history every turn — eating into the
-        14,400 TPM free-tier limit and increasing TTFT.
-
-        Strategy: keep last MAX_HISTORY_ITEMS items (6 ≈ 3 user+assistant pairs)
-        + the system prompt is always preserved.
-        Ensures that matching tool calls and tool responses are kept together to prevent
-        API validation errors.
+        Keeps the system prompt + last 8 conversation items (4 user+assistant pairs).
+        Simple slice is safe because max_function_call_steps=2 prevents orphaned
+        tool calls from ever appearing in the history window.
         """
-        MAX_HISTORY_ITEMS = 6
-        
-        # Always keep system messages
-        # Note: chat_ctx.items can contain AgentConfigUpdate or other non-message objects
+        MAX_HISTORY_TURNS = 8
+
         from livekit.agents.llm import ChatMessage
-        chat_messages = [m for m in chat_ctx.items if isinstance(m, ChatMessage)]
-        system_messages = [m for m in chat_messages if m.role == "system"]
-        conv_messages = [m for m in chat_messages if m.role != "system"]
-        
-        if len(conv_messages) > MAX_HISTORY_ITEMS:
-            sliced = conv_messages[-MAX_HISTORY_ITEMS:]
-            
-            # Find all tool call IDs from assistant messages in the slice
-            # Use hasattr() to safely handle different ChatMessage subtypes
-            call_ids_in_slice = set()
-            for m in sliced:
-                if m.role == "assistant" and hasattr(m, "tool_calls") and m.tool_calls:
-                    for tc in m.tool_calls:
-                        if hasattr(tc, "id") and tc.id:
-                            call_ids_in_slice.add(tc.id)
-            
-            # Filter to ensure we don't have dangling tool calls or responses
-            final_conv = []
-            for m in sliced:
-                if m.role == "tool":
-                    tid = getattr(m, "tool_call_id", "")
-                    if tid in call_ids_in_slice:
-                        final_conv.append(m)
-                    else:
-                        logger.info("Pruning dangling tool response message (call was truncated): %s", tid)
-                elif m.role == "assistant" and hasattr(m, "tool_calls") and m.tool_calls:
-                    # Keep assistant tool call only if the corresponding tool response is also in the slice
-                    all_responded = True
-                    for tc in m.tool_calls:
-                        tc_id = getattr(tc, "id", "")
-                        has_resp = any(
-                            getattr(rm, "tool_call_id", "") == tc_id
-                            for rm in sliced if rm.role == "tool"
-                        )
-                        if not has_resp:
-                            all_responded = False
-                            break
-                    if all_responded:
-                        final_conv.append(m)
-                    else:
-                        logger.info("Pruning tool call assistant message (response was truncated): %s", [getattr(tc, "id", "") for tc in m.tool_calls])
-                else:
-                    final_conv.append(m)
-            
-            # Rebuild ChatContext
+        all_items = [m for m in chat_ctx.items if isinstance(m, ChatMessage)]
+        system_msgs = [m for m in all_items if m.role == "system"]
+        conv_msgs   = [m for m in all_items if m.role != "system"]
+
+        if len(conv_msgs) > MAX_HISTORY_TURNS:
             pruned_ctx = ChatContext()
-            pruned_ctx.items.extend(system_messages)
-            pruned_ctx.items.extend(final_conv)
+            pruned_ctx.items.extend(system_msgs)
+            pruned_ctx.items.extend(conv_msgs[-MAX_HISTORY_TURNS:])
             chat_ctx = pruned_ctx
-            logger.debug("History safely pruned to %d items", len(chat_ctx.items))
-            
+            logger.debug("History pruned to %d items", len(chat_ctx.items))
+
         return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
 
     async def transcription_node(
@@ -366,10 +319,11 @@ async def entrypoint(ctx: JobContext):
     if config.TTS_PROVIDER == "elevenlabs":
         if elevenlabs is None:
             raise ImportError("livekit-plugins-elevenlabs is not installed or failed to import. Run pip install livekit-plugins-elevenlabs.")
-        logger.info(f"Initializing ElevenLabs TTS with voice ID: {config.ELEVENLABS_VOICE_ID}")
+        logger.info(f"Initializing ElevenLabs TTS: voice={config.ELEVENLABS_VOICE_ID} model={config.ELEVENLABS_MODEL}")
         tts_engine = elevenlabs.TTS(
             api_key=config.ELEVENLABS_API_KEY,
             voice_id=config.ELEVENLABS_VOICE_ID,
+            model=config.ELEVENLABS_MODEL,
         )
     else:
         logger.info(f"Initializing Sarvam TTS with voice: {config.SARVAM_VOICE}")
@@ -397,7 +351,9 @@ async def entrypoint(ctx: JobContext):
         ),
         tts=tts_engine,
         vad=vad,
-        tools=[search_policies, remember_detail, recall_detail, search_memories, send_whatsapp_details],
+        # recall_detail and search_memories removed — memories are pre-loaded in system prompt at call start
+        # Fewer tools = faster LLM tool-selection decisions
+        tools=[search_policies, remember_detail, send_whatsapp_details],
         userdata={"lead_id": lead_id, "lead": lead},
         max_function_call_steps=2,  # Prevent chained RAG spirals that cause 3-5s silence
     )

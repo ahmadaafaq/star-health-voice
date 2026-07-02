@@ -88,8 +88,8 @@ def prewarm_policy_index() -> None:
         import numpy as np
         from sentence_transformers import SentenceTransformer  # type: ignore
 
-        logger.info("Prewarming policy search: loading SentenceTransformer (all-mpnet-base-v2)...")
-        _policy_model = SentenceTransformer("all-mpnet-base-v2", device="cpu")
+        logger.info("Prewarming policy search: loading SentenceTransformer (all-MiniLM-L6-v2)...")
+        _policy_model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
 
         logger.info("Prewarming policy search: building FAISS index from %s ...", embeddings_path)
         with open(chunks_path, "r", encoding="utf-8") as f:

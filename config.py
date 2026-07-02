@@ -1,10 +1,9 @@
 import os
 
 # ─── LLM (Groq) ───────────────────────────────────────────────────────────────
-GROQ_MODEL = "llama-3.3-70b-versatile"
-GROQ_TEMPERATURE = 0.5            # lower = shorter, more predictable voice replies
-GROQ_MAX_TOKENS = 120             # 1-2 sentences ≈ 40-80 tokens; cap prevents runaway generation
-                                  # and directly reduces TTFT + protects TPM quota
+GROQ_MODEL = "llama-3.3-70b-specdec"   # Same 70b quality as versatile, 2-3x faster TTFT via speculative decoding (paid plan)
+GROQ_TEMPERATURE = 0.4            # lower = shorter, more predictable voice replies
+GROQ_MAX_TOKENS = 100             # 1-2 sentences ≈ 40-80 tokens; cap prevents runaway generation
 
 # ─── STT (Deepgram) ───────────────────────────────────────────────────────────
 DEEPGRAM_STT_MODEL = "nova-2-general"
@@ -15,6 +14,8 @@ TTS_PROVIDER = "elevenlabs"            # Options: "sarvam" or "elevenlabs"
 # ElevenLabs Settings
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "6kpMXeRmTQXHAKa2goju")
+ELEVENLABS_MODEL = "eleven_flash_v2_5"  # Lowest latency (~75ms TTFA) with full multilingual/Hindi support
+                                        # Alternatives: "eleven_turbo_v2_5" (~150ms), "eleven_multilingual_v2" (~400ms)
 
 # Sarvam Settings
 SARVAM_MODEL = "bulbul:v2"

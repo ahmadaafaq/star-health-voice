@@ -1,20 +1,25 @@
 """
 scripts/build_policy_index.py
 ─────────────────────────────
-One-time script to pull policy chunk embeddings from Supabase and save them
-as a local numpy index for in-process FAISS search inside the voice agent.
+Builds the local FAISS policy index for in-process search inside the voice agent.
 
-Run this script whenever policy documents are updated in Supabase:
+Fetches policy chunk TEXT from Supabase, re-embeds locally using
+all-MiniLM-L6-v2 (80MB, 384-dim, ~25ms encode) for fast runtime search.
+
+Run this script whenever:
+  - Policy documents are updated in Supabase
+  - The embedding model is changed (required — dimensions must match)
 
     cd /path/to/star-health-voice-agent
+    source venv/bin/activate
     python scripts/build_policy_index.py
 
 Output files (written to policy_index/):
     chunks.json      — list of {text, policy} dicts (one per chunk)
-    embeddings.npy   — float32 numpy array of shape (N, 768), L2-normalised
+    embeddings.npy   — float32 numpy array of shape (N, 384), L2-normalised
 
-The existing embeddings stored in Supabase were generated with
-all-mpnet-base-v2 (768-dim). We re-use them as-is — no re-embedding needed.
+NOTE: Uses all-MiniLM-L6-v2 (384-dim). If you change the model here,
+      you MUST also update tools/policy_rag.py to use the same model.
 """
 
 import json
@@ -27,13 +32,8 @@ from dotenv import load_dotenv
 from supabase import create_client
 
 # ── Load env ──────────────────────────────────────────────────────────────────
-# policy_chunks lives in the same Supabase project as the RAG service.
-# The RAG repo uses SUPABASE_SERVICE_KEY; the voice-agent uses SUPABASE_SERVICE_ROLE_KEY.
-# We try the RAG repo's .env first (it has guaranteed access to policy_chunks),
-# then fall back to the voice-agent's own .env.
 ROOT = Path(__file__).parent.parent
 
-# Resolve sibling RAG repo path
 RAG_ENV = ROOT.parent / "star-health-rag" / ".env"
 if RAG_ENV.exists():
     load_dotenv(RAG_ENV)
@@ -43,8 +43,6 @@ else:
     print("RAG repo .env not found — using voice-agent .env credentials.")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
-# RAG repo key: SUPABASE_SERVICE_KEY
-# Voice-agent key: SUPABASE_SERVICE_ROLE_KEY
 SUPABASE_KEY = (
     os.getenv("SUPABASE_SERVICE_KEY", "")
     or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
@@ -58,81 +56,73 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     )
     sys.exit(1)
 
+EMBEDDING_MODEL = "all-MiniLM-L6-v2"  # Must match tools/policy_rag.py
 OUTPUT_DIR = ROOT / "policy_index"
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-CHUNKS_PATH = OUTPUT_DIR / "chunks.json"
+CHUNKS_PATH     = OUTPUT_DIR / "chunks.json"
 EMBEDDINGS_PATH = OUTPUT_DIR / "embeddings.npy"
 
-# ── Fetch ─────────────────────────────────────────────────────────────────────
+# ── Fetch text chunks from Supabase (text only, no pre-computed embeddings) ───
 print("Connecting to Supabase...")
 db = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-print("Fetching policy chunks (policy_name, chunk_text, embedding)...")
-res = db.table("policy_chunks").select("policy_name, chunk_text, embedding").execute()
+print("Fetching policy chunks (policy_name, chunk_text)...")
+res = db.table("policy_chunks").select("policy_name, chunk_text").execute()
 rows = res.data or []
 print(f"  → Fetched {len(rows)} rows from policy_chunks.")
 
-# ── Parse embeddings ──────────────────────────────────────────────────────────
+# ── Build chunks metadata list ─────────────────────────────────────────────────
 chunks_meta: list[dict] = []
-raw_embeddings: list[list[float]] = []
+texts: list[str] = []
 
-skipped = 0
 for row in rows:
-    emb_val = row.get("embedding")
-    if not emb_val:
-        skipped += 1
+    text = (row.get("chunk_text") or "").strip()
+    if not text:
         continue
-
-    # pgvector returns embeddings in several possible string formats
-    if isinstance(emb_val, str):
-        cleaned = emb_val.strip()
-        try:
-            if cleaned.startswith("[") and cleaned.endswith("]"):
-                emb_list = json.loads(cleaned)
-            elif cleaned.startswith("{") and cleaned.endswith("}"):
-                emb_list = [float(x) for x in cleaned[1:-1].split(",")]
-            else:
-                emb_list = [float(x) for x in cleaned.strip("[]{} ").split(",")]
-        except Exception as e:
-            print(f"  WARN: could not parse embedding for row — skipping. ({e})")
-            skipped += 1
-            continue
-    elif isinstance(emb_val, list):
-        emb_list = [float(x) for x in emb_val]
-    else:
-        skipped += 1
-        continue
-
     chunks_meta.append(
         {
-            "text": row.get("chunk_text", ""),
+            "text": text,
             "policy": row.get("policy_name", ""),
         }
     )
-    raw_embeddings.append(emb_list)
+    texts.append(text)
 
-print(f"  → Parsed {len(raw_embeddings)} valid chunks  |  Skipped: {skipped}")
+print(f"  → {len(texts)} valid text chunks to embed.")
 
-if not raw_embeddings:
-    print("ERROR: No valid embeddings found. Aborting.")
+if not texts:
+    print("ERROR: No valid text chunks found. Aborting.")
     sys.exit(1)
 
-# ── Normalise (L2) so FAISS IndexFlatIP gives cosine similarity ───────────────
-emb_array = np.array(raw_embeddings, dtype=np.float32)
-norms = np.linalg.norm(emb_array, axis=1, keepdims=True)
-norms[norms == 0] = 1.0          # avoid division by zero for zero vectors
-emb_normalised = emb_array / norms
+# ── Re-embed locally with all-MiniLM-L6-v2 ────────────────────────────────────
+print(f"\nLoading SentenceTransformer model: {EMBEDDING_MODEL} ...")
+try:
+    from sentence_transformers import SentenceTransformer
+except ImportError:
+    print("ERROR: sentence-transformers not installed. Run: pip install sentence-transformers")
+    sys.exit(1)
 
-print(f"  → Embedding matrix shape: {emb_normalised.shape}")
+model = SentenceTransformer(EMBEDDING_MODEL, device="cpu")
+print(f"  → Model loaded. Embedding {len(texts)} chunks (this may take a minute)...")
+
+embeddings = model.encode(
+    texts,
+    normalize_embeddings=True,   # L2-normalise so IndexFlatIP == cosine similarity
+    convert_to_numpy=True,
+    show_progress_bar=True,
+    batch_size=64,
+).astype(np.float32)
+
+print(f"  → Embedding matrix shape: {embeddings.shape}")
 
 # ── Save ──────────────────────────────────────────────────────────────────────
 with open(CHUNKS_PATH, "w", encoding="utf-8") as f:
     json.dump(chunks_meta, f, ensure_ascii=False, indent=2)
 
-np.save(str(EMBEDDINGS_PATH), emb_normalised)
+np.save(str(EMBEDDINGS_PATH), embeddings)
 
 print("\n✅  Policy index built successfully!")
 print(f"    chunks.json   : {CHUNKS_PATH}  ({len(chunks_meta)} chunks)")
-print(f"    embeddings.npy: {EMBEDDINGS_PATH}  (shape={emb_normalised.shape}, dtype=float32)")
+print(f"    embeddings.npy: {EMBEDDINGS_PATH}  (shape={embeddings.shape}, dtype=float32)")
+print(f"    Model used    : {EMBEDDING_MODEL}")
 print("\nRun this script again whenever policy_chunks in Supabase are updated.")
