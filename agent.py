@@ -19,6 +19,7 @@ os.environ["SSL_CERT_FILE"] = certifi.where()
 import asyncio
 import json
 import logging
+import httpx
 from typing import Any, AsyncIterable
 
 from dotenv import load_dotenv
@@ -139,8 +140,8 @@ class StarHealthAgent(Agent):
         wrapped_tts = tts.StreamAdapter(
             tts=self.session.tts,
             sentence_tokenizer=PhraseTokenizer(
-                min_words_soft=5,   # flush at comma/colon after 5+ words
-                max_words=12,       # force flush if no punctuation in 12 words
+                min_words_soft=8,   # flush at comma/colon after 8+ words
+                max_words=20,       # force flush if no punctuation in 20 words
             ),
         )
 
@@ -227,7 +228,14 @@ async def entrypoint(ctx: JobContext):
     if lead_id in ("undefined", "null", "anonymous", ""):
         lead_id = None
 
-    # ── WebRTC Inbound Call Fallback: Resolve lead_id from active room participants ──
+    # ── WebRTC Inbound Call Fallback: Resolve lead_id from room name or participant identity/metadata ──
+    if not lead_id:
+        if ctx.room.name.startswith("browser-room-"):
+            room_parts = ctx.room.name.split("-")
+            if len(room_parts) >= 4:
+                lead_id = "-".join(room_parts[2:-1])
+                logger.info(f"Resolved lead_id from room name: {lead_id}")
+
     if not lead_id:
         for identity, participant in ctx.room.remote_participants.items():
             if identity.startswith("customer-"):
@@ -241,11 +249,10 @@ async def entrypoint(ctx: JobContext):
                 except Exception:
                     pass
 
-                parts = identity.split("-")
-                if len(parts) > 1 and parts[1] and parts[1] not in ("undefined", "null", "anonymous", ""):
-                    lead_id = parts[1]
-                    logger.info(f"Resolved lead_id from participant identity: {lead_id}")
-                    break
+                # Strip customer- prefix to get the full UUID or ID (e.g. customer-UUID)
+                lead_id = identity[len("customer-"):]
+                logger.info(f"Resolved lead_id from participant identity: {lead_id}")
+                break
 
     logger.info(f"Final resolved Lead ID for session: {lead_id}")
 
