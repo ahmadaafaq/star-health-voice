@@ -32,11 +32,26 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("make-call")
 
 
-async def dispatch_call(phone_number: str, lead_id: str = None):
+async def dispatch_call(phone_number: str = None, lead_id: str = None):
     """
-    Dispatch an outbound SIP call to `phone_number`.
-    The call will be handled by the StarHealth agent running in LiveKit Cloud.
+    Dispatch an outbound SIP call.
+    If phone_number is not provided, retrieves it from the Supabase lead profile using lead_id.
     """
+    if not phone_number and not lead_id:
+        logger.error("❌ Error: Must provide either --to (phone number) or --lead-id")
+        return
+
+    # If no phone number is supplied, retrieve it from Supabase lead
+    if not phone_number and lead_id:
+        from context_loader import preload_lead
+        logger.info(f"🔍 Fetching phone number from Supabase for lead: {lead_id}")
+        lead, _ = await preload_lead(lead_id)
+        phone_number = lead.get("phone", "")
+        if not phone_number:
+            logger.error(f"❌ Error: Lead {lead_id} does not have a valid phone number in Supabase")
+            return
+        logger.info(f"✅ Found phone number: {phone_number}")
+
     livekit_url = os.getenv("LIVEKIT_URL")
     api_key = os.getenv("LIVEKIT_API_KEY")
     api_secret = os.getenv("LIVEKIT_API_SECRET")
@@ -100,13 +115,17 @@ async def dispatch_call(phone_number: str, lead_id: str = None):
 
 def main():
     parser = argparse.ArgumentParser(description="Dispatch a Star Health outbound call via LiveKit.")
-    parser.add_argument("--to", required=True, help="Customer phone number in E.164 format (e.g., +919876543210)")
-    parser.add_argument("--lead-id", default=None, help="Supabase lead UUID (optional but recommended)")
+    parser.add_argument("--to", default=None, help="Customer phone number in E.164 format (e.g., +919876543210)")
+    parser.add_argument("--lead-id", default=None, help="Supabase lead UUID")
     args = parser.parse_args()
 
-    phone = args.to.strip()
-    if not phone.startswith("+"):
+    phone = args.to.strip() if args.to else None
+    if phone and not phone.startswith("+"):
         print("❌ Error: Phone number must start with '+' and country code (e.g., +919876543210)")
+        return
+
+    if not phone and not args.lead_id:
+        print("❌ Error: You must supply either --to or --lead-id")
         return
 
     asyncio.run(dispatch_call(phone_number=phone, lead_id=args.lead_id))
