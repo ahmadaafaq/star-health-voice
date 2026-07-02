@@ -11,7 +11,7 @@ GROQ_MAX_TOKENS = 120             # 1-2 sentences ≈ 40-80 tokens; cap prevents
 
 # ─── STT (Deepgram) ───────────────────────────────────────────────────────────
 DEEPGRAM_STT_MODEL = "nova-2-general"
-DEEPGRAM_STT_LANGUAGE = "hi-en"     # Hinglish bilingual support (Hindi + English)
+DEEPGRAM_STT_LANGUAGE = "hi"     # Hindi & Hinglish support (note: 'hi-en' is invalid in Deepgram and causes 400 errors)
 
 # ─── TTS (Sarvam) ─────────────────────────────────────────────────────────────
 SARVAM_MODEL = "bulbul:v2"
