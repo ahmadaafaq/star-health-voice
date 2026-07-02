@@ -13,7 +13,7 @@ DEEPGRAM_STT_LANGUAGE = "hi"     # Hindi & Hinglish support (note: 'hi-en' is in
 TTS_PROVIDER = "sarvam"            # Options: "sarvam" or "elevenlabs"
 
 # ElevenLabs Settings
-ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "sk_8cb3d621158e5e22b47ac59a00e5faf10fbfb623e214acba")
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "6kpMXeRmTQXHAKa2goju")
 
 # Sarvam Settings
