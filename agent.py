@@ -355,6 +355,7 @@ async def entrypoint(ctx: JobContext):
         # Fewer tools = faster LLM tool-selection decisions
         tools=[search_policies, remember_detail, send_whatsapp_details],
         userdata={"lead_id": lead_id, "lead": lead},
+        max_tool_steps=1,  # Cap consecutive tool calls to 1 per turn to avoid 3-second search loops
     )
 
     # ── Start the session ──────────────────────────────────────────────────────

@@ -30,14 +30,14 @@ VAD_ACTIVATION_THRESHOLD = 0.5
 # ─── Star Health Plans (compact reference — injected into system prompt) ──────
 STAR_HEALTH_PLANS_COMPACT = """
 Plans summary (call search_policies for details):
-- Arogya Sanjeevani: Entry-level standard policy, starting at ₹799/month, ₹5L-2Cr cover.
-- Family Health Optima: Floater with restoration benefit, starting at ₹1,199/month, ₹5L-25L cover.
-- Medi Classic: Individual classic health cover, starting at ₹899/month, ₹5L-15L cover.
-- Star Health Assure: Comprehensive floater (covers up to 9 members), starting at ₹1,499/month, ₹5L-2Cr cover.
-- Star Premier: Senior citizen policy (50+ age, no pre-policy tests), starting at ₹1,899/month, ₹10L-1Cr cover.
-- Young Star: Tailored for young adults (18-40 age, unlimited restoration), starting at ₹699/month, ₹5L-1Cr cover.
-- Super Star: Flagship top-tier premium coverage, starting at ₹2,299/month, ₹5L-5Cr cover.
-- Star Comprehensive: Premium policy with OPD, maternity & global cover, starting at ₹1,099/month, ₹5L-1Cr cover.
+- Arogya Sanjeevani: Entry-level standard policy, starting at 799 Rupees per month, 5 Lakh to 2 Crore Rupees coverage.
+- Family Health Optima: Floater with restoration benefit, starting at 1,199 Rupees per month, 5 Lakh to 25 Lakh Rupees coverage.
+- Medi Classic: Individual classic health cover, starting at 899 Rupees per month, 5 Lakh to 15 Lakh Rupees coverage.
+- Star Health Assure: Comprehensive floater (covers up to 9 members), starting at 1,499 Rupees per month, 5 Lakh to 2 Crore Rupees coverage.
+- Star Premier: Senior citizen policy (50+ age, no pre-policy tests), starting at 1,899 Rupees per month, 10 Lakh to 1 Crore Rupees coverage.
+- Young Star: Tailored for young adults (18-40 age, unlimited restoration), starting at 699 Rupees per month, 5 Lakh to 1 Crore Rupees coverage.
+- Super Star: Flagship top-tier premium coverage, starting at 2,299 Rupees per month, 5 Lakh to 5 Crore Rupees coverage.
+- Star Comprehensive: Premium policy with OPD, maternity & global cover, starting at 1,099 Rupees per month, 5 Lakh to 1 Crore Rupees coverage.
 """
 
 # ─── Agent persona ─────────────────────────────────────────────────────────────
