@@ -1,9 +1,9 @@
 """
 Star Health Insurance Voice Agent
 ──────────────────────────────────
-Stack: LiveKit Cloud · Deepgram STT (Nova-2) · Groq LLM (llama-3.3-70b) · Sarvam TTS (Anushka)
+Stack: LiveKit Cloud · Deepgram STT (Nova-2) · Groq LLM (llama-3.1-8b-instant) · Sarvam TTS (Anushka)
 Memory: Supabase agent_memories table (persistent across calls)
-RAG: star-health-rag /api/search via search_policies tool (on-demand only)
+RAG: In-process FAISS search (all-mpnet-base-v2, prewarmed) — HTTP fallback via star-health-rag
 
 Usage:
     python agent.py dev       # local console test (no SIP)
@@ -38,7 +38,7 @@ from livekit.plugins import deepgram, openai, silero, sarvam
 import config
 from context_loader import preload_lead, build_system_prompt
 from tools.memory import remember_detail, recall_detail, search_memories
-from tools.policy_rag import search_policies
+from tools.policy_rag import search_policies, prewarm_policy_index
 from tools.whatsapp import send_whatsapp_details
 
 load_dotenv(".env")
@@ -52,13 +52,17 @@ logger = logging.getLogger("star-health-agent")
 # ─── Pre-warm: load Silero VAD model once per worker process ──────────────────
 
 def prewarm(proc: JobProcess):
-    """Load heavy models once when the worker starts, not per-call."""
+    """Load heavy models ONCE when the worker process starts — never per-call."""
+    # 1. Silero VAD (used for end-of-speech detection)
     logger.info("Prewarming Silero VAD model...")
     proc.userdata["vad"] = silero.VAD.load(
         min_silence_duration=config.VAD_MIN_SILENCE_DURATION,
         activation_threshold=config.VAD_ACTIVATION_THRESHOLD,
     )
     logger.info("Silero VAD loaded.")
+
+    # 2. Policy search: SentenceTransformer + FAISS index (in-process, zero HTTP)
+    prewarm_policy_index()
 
 
 # ─── Agent class ─────────────────────────────────────────────────────────────
