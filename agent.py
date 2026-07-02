@@ -208,8 +208,11 @@ class StarHealthAgent(Agent):
         MAX_HISTORY_ITEMS = 6
         
         # Always keep system messages
-        system_messages = [m for m in chat_ctx.items if m.role == "system"]
-        conv_messages = [m for m in chat_ctx.items if m.role != "system"]
+        # Note: chat_ctx.items can contain AgentConfigUpdate objects which have no .role
+        from livekit.agents.llm import ChatMessage
+        chat_messages = [m for m in chat_ctx.items if isinstance(m, ChatMessage)]
+        system_messages = [m for m in chat_messages if m.role == "system"]
+        conv_messages = [m for m in chat_messages if m.role != "system"]
         
         if len(conv_messages) > MAX_HISTORY_ITEMS:
             sliced = conv_messages[-MAX_HISTORY_ITEMS:]
