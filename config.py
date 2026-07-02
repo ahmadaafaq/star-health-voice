@@ -20,7 +20,7 @@ SARVAM_LANGUAGE = "hi-IN"         # Synthesizes Hindi/Hinglish speech
 
 # ─── VAD (Silero) ─────────────────────────────────────────────────────────────
 # Lower min_silence_duration = faster response but may interrupt the user
-VAD_MIN_SILENCE_DURATION = 0.2   # seconds (200 ms)
+VAD_MIN_SILENCE_DURATION = 0.25   # seconds (250 ms) — minimum allowed by LiveKit's TurnDetector
 VAD_ACTIVATION_THRESHOLD = 0.5
 
 # ─── Star Health Plans (compact reference — injected into system prompt) ──────
