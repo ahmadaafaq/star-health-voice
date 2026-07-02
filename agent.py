@@ -95,29 +95,43 @@ class StarHealthAgent(Agent):
         gender = self._lead.get("gender", "").strip().lower()
         salutation = "Sir" if gender == "male" else "Ma'am" if gender == "female" else "Sir or Ma'am"
         recommended_plan = self._lead.get("recommended_plan") or self._lead.get("recommendedPlan", "")
+        recommendation_reason = (
+            self._lead.get("recommendation_reason")
+            or self._lead.get("why_this_plan")
+            or ""
+        )
+
+        # Build a one-line reason snippet (≤12 words) so the greeting stays short
+        reason_snippet = ""
+        if recommendation_reason:
+            words = recommendation_reason.split()
+            reason_snippet = " ".join(words[:12]) + ("…" if len(words) > 12 else "")
 
         if self._is_voip:
             greeting_instruction = (
-                f"Greet the customer warmly since they initiated this browser call to speak with you. "
-                f"Address them as {first_name or salutation}. "
+                f"Greet the customer in warm Hinglish (Hindi words in Devanagari + English terms). "
+                f"Write the customer's first name phonetically in Devanagari script (e.g. नमन for Naman, प्रिया for Priya). "
                 f"Say you are Priya from Star Health Insurance. "
-                f"Say you are here to help them with their health insurance assessment "
-                f"{'and answer any questions about the ' + recommended_plan + ' plan' if recommended_plan else ''}. "
-                f"Ask how you can help them today. Keep it to 2 sentences maximum. "
-                f"Never address them as bhaiya, didi, or other colloquial terms; only use Sir/Ma'am or their name."
+                f"Immediately mention their recommended plan: '{recommended_plan or 'a plan tailored for them'}'. "
+                f"{('Briefly say why: ' + reason_snippet + '. ') if reason_snippet else ''}"
+                f"Then ask: 'क्या आप इसके बारे में जानना चाहेंगे?' (or similar). "
+                f"Keep it to exactly 2 natural spoken sentences. "
+                f"No markdown, no lists. Never use bhaiya, didi, or colloquial terms."
             )
         else:
             greeting_instruction = (
-                f"Greet the customer warmly on this outbound call. Their name is {name or 'unknown'}. "
-                f"Address them as {first_name or salutation}. "
+                f"Greet the customer in warm Hinglish on this outbound call. "
+                f"Write the customer's name phonetically in Devanagari script (e.g. नमन for Naman, प्रिया for Priya). "
                 f"Say you are Priya from Star Health Insurance. "
-                f"Mention you are calling about their health insurance assessment "
-                f"{'and their interest in the ' + recommended_plan + ' plan' if recommended_plan else ''}. "
-                f"Ask if this is a good time to talk. Keep it to 2 sentences maximum. "
-                f"Never address them as bhaiya, didi, or other colloquial terms; only use Sir/Ma'am or their name."
+                f"Mention their recommended plan: '{recommended_plan or 'a plan tailored for them'}' "
+                f"{('and briefly say why: ' + reason_snippet + '. ') if reason_snippet else ''}. "
+                f"Ask if this is a good time to talk. "
+                f"Keep it to exactly 2 natural spoken sentences. "
+                f"No markdown, no lists. Never use bhaiya, didi, or colloquial terms."
             )
 
         await self.session.generate_reply(instructions=greeting_instruction)
+
 
     async def tts_node(
         self, text: AsyncIterable[str], model_settings: Any

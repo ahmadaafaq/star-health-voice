@@ -15,7 +15,7 @@ DEEPGRAM_STT_LANGUAGE = "hi-en"     # Hinglish bilingual support (Hindi + Englis
 
 # ─── TTS (Sarvam) ─────────────────────────────────────────────────────────────
 SARVAM_MODEL = "bulbul:v2"
-SARVAM_VOICE = "shreya"            # Shreya voice (fluent in Hinglish & Hindi)
+SARVAM_VOICE = "manisha"           # Female voice compatible with bulbul:v2 (anushka, manisha, vidya are the female options)
 SARVAM_LANGUAGE = "hi-IN"         # Synthesizes Hindi/Hinglish speech
 
 # ─── VAD (Silero) ─────────────────────────────────────────────────────────────
