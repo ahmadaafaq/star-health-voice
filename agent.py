@@ -35,6 +35,10 @@ from livekit.agents import (
     cli,
 )
 from livekit.plugins import deepgram, openai, silero, sarvam
+try:
+    from livekit.plugins import elevenlabs
+except ImportError:
+    elevenlabs = None
 
 import config
 from context_loader import preload_lead, build_system_prompt
@@ -354,6 +358,22 @@ async def entrypoint(ctx: JobContext):
         activation_threshold=config.VAD_ACTIVATION_THRESHOLD,
     )
 
+    if config.TTS_PROVIDER == "elevenlabs":
+        if elevenlabs is None:
+            raise ImportError("livekit-plugins-elevenlabs is not installed or failed to import. Run pip install livekit-plugins-elevenlabs.")
+        logger.info(f"Initializing ElevenLabs TTS with voice ID: {config.ELEVENLABS_VOICE_ID}")
+        tts_engine = elevenlabs.TTS(
+            api_key=config.ELEVENLABS_API_KEY,
+            voice_id=config.ELEVENLABS_VOICE_ID,
+        )
+    else:
+        logger.info(f"Initializing Sarvam TTS with voice: {config.SARVAM_VOICE}")
+        tts_engine = sarvam.TTS(
+            model=config.SARVAM_MODEL,
+            speaker=config.SARVAM_VOICE,
+            target_language_code=config.SARVAM_LANGUAGE,
+        )
+
     session = AgentSession(
         stt=deepgram.STT(
             model=config.DEEPGRAM_STT_MODEL,
@@ -370,11 +390,7 @@ async def entrypoint(ctx: JobContext):
             temperature=config.GROQ_TEMPERATURE,
             max_completion_tokens=config.GROQ_MAX_TOKENS,
         ),
-        tts=sarvam.TTS(
-            model=config.SARVAM_MODEL,
-            speaker=config.SARVAM_VOICE,
-            target_language_code=config.SARVAM_LANGUAGE,
-        ),
+        tts=tts_engine,
         vad=vad,
         tools=[search_policies, remember_detail, recall_detail, search_memories, send_whatsapp_details],
         userdata={"lead_id": lead_id, "lead": lead},

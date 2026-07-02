@@ -14,3 +14,5 @@ uvicorn>=0.28.0
 faiss-cpu>=1.7.0
 sentence-transformers>=2.7.0
 numpy>=1.24.0
+livekit-plugins-elevenlabs>=0.8.0
+
