@@ -170,11 +170,11 @@ class StarHealthAgent(Agent):
         call sends ~2,400 tokens of history every turn — eating into the
         14,400 TPM free-tier limit and increasing TTFT.
 
-        Strategy: keep last MAX_HISTORY_ITEMS items (14 ≈ 7 user+assistant pairs)
+        Strategy: keep last MAX_HISTORY_ITEMS items (6 ≈ 3 user+assistant pairs)
         + the system prompt is always preserved by ChatContext.truncate().
-        This bounds context at ~1,100 tokens/turn regardless of call length.
+        This bounds context at ~850 tokens/turn regardless of call length.
         """
-        MAX_HISTORY_ITEMS = 14   # 7 user+assistant pairs; system prompt added back automatically
+        MAX_HISTORY_ITEMS = 6   # 3 user+assistant pairs; system prompt added back automatically
         chat_ctx = chat_ctx.copy()  # don't mutate the live context
         if len(chat_ctx.items) > MAX_HISTORY_ITEMS:
             chat_ctx.truncate(max_items=MAX_HISTORY_ITEMS)
@@ -308,7 +308,7 @@ async def entrypoint(ctx: JobContext):
     if lead_id:
         try:
             logger.info(f"Starting post-call analysis for lead: {lead_id}")
-            messages = list(chat_ctx.messages)
+            messages = chat_ctx.messages()
             
             # Format chat transcript for the LLM
             transcript_lines = []
