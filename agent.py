@@ -152,17 +152,18 @@ class StarHealthAgent(Agent):
         self, text: AsyncIterable[str], model_settings: Any
     ):
         """
-        Phrase-level TTS buffering for Sarvam Bulbul.
+        Phrase-level TTS buffering.
 
-        Flushes text to TTS synthesis at:
-          - Hard sentence boundaries  → . ! ? । ॥    (flush immediately)
-          - Soft clause boundaries    → , ; :          (flush after 5+ words)
-          - Force flush               → every 12 words (no punctuation fallback)
-
-        This starts Sarvam synthesis on the first phrase while the LLM is still
-        generating the remainder, overlapping LLM and TTS work and delivering
-        first audio ~200–350ms sooner than sentence-level buffering.
+        For Sarvam: flushes text to TTS at phrase boundaries to overlap LLM and TTS.
+        For ElevenLabs: passthrough — ElevenLabs plugin handles its own streaming
+        natively and double-wrapping adds buffering latency.
         """
+        # ElevenLabs streams natively — skip the PhraseTokenizer wrapper
+        if config.TTS_PROVIDER == "elevenlabs":
+            async for frame in Agent.default.tts_node(self, text, model_settings):
+                yield frame
+            return
+
         from livekit.agents import tts
         from livekit.agents.utils import aio
 
@@ -398,6 +399,7 @@ async def entrypoint(ctx: JobContext):
         vad=vad,
         tools=[search_policies, remember_detail, recall_detail, search_memories, send_whatsapp_details],
         userdata={"lead_id": lead_id, "lead": lead},
+        max_function_call_steps=2,  # Prevent chained RAG spirals that cause 3-5s silence
     )
 
     # ── Start the session ──────────────────────────────────────────────────────
