@@ -63,7 +63,9 @@ def prewarm(proc: JobProcess):
     logger.info("Silero VAD loaded.")
 
     # 2. Policy search: SentenceTransformer + FAISS index (in-process, zero HTTP)
-    prewarm_policy_index()
+    # Run in a background thread so it doesn't block the LiveKit process startup (10s timeout)
+    import threading
+    threading.Thread(target=prewarm_policy_index, daemon=True).start()
 
 
 # ─── Agent class ─────────────────────────────────────────────────────────────
