@@ -26,20 +26,35 @@ import numpy as np
 from dotenv import load_dotenv
 from supabase import create_client
 
-# ── Load env from the project root ────────────────────────────────────────────
+# ── Load env ──────────────────────────────────────────────────────────────────
+# policy_chunks lives in the same Supabase project as the RAG service.
+# The RAG repo uses SUPABASE_SERVICE_KEY; the voice-agent uses SUPABASE_SERVICE_ROLE_KEY.
+# We try the RAG repo's .env first (it has guaranteed access to policy_chunks),
+# then fall back to the voice-agent's own .env.
 ROOT = Path(__file__).parent.parent
-load_dotenv(ROOT / ".env")
+
+# Resolve sibling RAG repo path
+RAG_ENV = ROOT.parent / "star-health-rag" / ".env"
+if RAG_ENV.exists():
+    load_dotenv(RAG_ENV)
+    print(f"Loaded Supabase credentials from RAG repo: {RAG_ENV}")
+else:
+    load_dotenv(ROOT / ".env")
+    print("RAG repo .env not found — using voice-agent .env credentials.")
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
-# The voice-agent env uses SUPABASE_SERVICE_ROLE_KEY
+# RAG repo key: SUPABASE_SERVICE_KEY
+# Voice-agent key: SUPABASE_SERVICE_ROLE_KEY
 SUPABASE_KEY = (
-    os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-    or os.getenv("SUPABASE_SERVICE_KEY", "")
+    os.getenv("SUPABASE_SERVICE_KEY", "")
+    or os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 ).strip()
 
 if not SUPABASE_URL or not SUPABASE_KEY:
     print(
-        "ERROR: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in .env"
+        "ERROR: Could not find Supabase credentials.\n"
+        "  Tried: SUPABASE_SERVICE_KEY and SUPABASE_SERVICE_ROLE_KEY\n"
+        "  Make sure star-health-rag/.env exists with SUPABASE_URL and SUPABASE_SERVICE_KEY."
     )
     sys.exit(1)
 
