@@ -11,7 +11,7 @@ Message formats sent:
 SERVER-SIDE STEP STATE:
   Tracks current step per room to prevent the LLM from spamming advance calls.
   - Only one advance is allowed per 5-second window per room.
-  - Step is clamped to [1, 5]. Attempts to go past 5 are rejected.
+  - Step is clamped to [1, 4]. Attempts to go past 4 are rejected.
 """
 
 import json
@@ -27,7 +27,7 @@ logger = logging.getLogger("star-health-agent.form_control")
 _room_step_state: Dict[str, dict] = {}
 
 MIN_ADVANCE_COOLDOWN_SECS = 5.0  # Minimum seconds between advance calls
-MAX_STEP = 5
+MAX_STEP = 4
 
 
 def _get_state(ctx: RunContext) -> dict:
@@ -221,7 +221,7 @@ async def advance_form_step(ctx: RunContext) -> str:
 async def submit_form(ctx: RunContext) -> str:
     """
     Trigger final form submission to generate the AI insurance recommendation.
-    Call this ONLY after the customer has verbally confirmed ALL details on Step 5
+    Call this ONLY after the customer has verbally confirmed ALL details on Step 4
     (lead_name, lead_phone, lead_gender are filled and customer said yes/confirm).
     WARNING: This can only be called ONCE per session. Duplicate calls will be rejected.
     """
@@ -232,7 +232,7 @@ async def submit_form(ctx: RunContext) -> str:
         logger.warning("submit_form rejected: form already submitted for this room")
         return "ERROR: Form has already been submitted. Do not call submit_form again."
 
-    # Guard 2: Must be on step 5
+    # Guard 2: Must be on step 4
     if state["step"] < MAX_STEP:
         logger.warning(f"submit_form rejected: currently on step {state['step']}, must be on step {MAX_STEP}")
         return f"ERROR: Cannot submit yet. You are on step {state['step']}. Complete all steps up to step {MAX_STEP} first."
@@ -256,12 +256,11 @@ async def go_to_form_step(ctx: RunContext, step: int) -> str:
     Call this when the customer requests to edit, change, or go back to a previous page/details (e.g. "Mujhe details badalna hai", "age modify karni hai", etc.).
 
     Args:
-        step: Step number to navigate to (integer between 1 and 5).
+        step: Step number to navigate to (integer between 1 and 4).
               Step 1: members/age
               Step 2: diabetes/pregnancy/pre_existing
               Step 3: city/budget
-              Step 4: company insurance/preferred hospital
-              Step 5: contact details (name/phone/email/gender)
+              Step 4: contact details (name/phone/email/gender)
     """
     # Clamp to valid range
     clamped = max(1, min(MAX_STEP, step))
