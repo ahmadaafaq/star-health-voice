@@ -18,7 +18,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request, Form
+from fastapi.responses import PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
@@ -113,6 +114,51 @@ async def get_token(leadId: Optional[str] = Query(None)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/voice/form-token")
+async def get_form_token(mode: str = "form_filling"):
+    """
+    Generate a LiveKit WebRTC token for the Voice Form Assistant or Policy Advisor.
+    No lead ID required — this is for anonymous pre-submission form sessions.
+    Room name uses 'form-room-' prefix so agent.py detects form mode automatically.
+    When mode=advisor, uses 'advisor-room-' prefix for policy advisor reconnection.
+    """
+    try:
+        api_key = os.getenv("LIVEKIT_API_KEY")
+        api_secret = os.getenv("LIVEKIT_API_SECRET")
+
+        if not api_key or not api_secret:
+            raise HTTPException(status_code=500, detail="LiveKit credentials missing in .env")
+
+        is_advisor = mode == "advisor"
+        room_prefix = "advisor-room-" if is_advisor else "form-room-"
+        room_name = f"{room_prefix}{os.urandom(4).hex()}"
+        participant_identity = f"visitor-{os.urandom(3).hex()}"
+
+        token = AccessToken(api_key, api_secret)
+        token.with_grants(VideoGrants(
+            room_join=True,
+            room=room_name,
+            can_publish=True,
+            can_subscribe=True,
+            can_publish_data=True,
+        ))
+        token.identity = participant_identity
+        token.name = "Web Visitor (Policy Advisor)" if is_advisor else "Web Visitor (Form Assistant)"
+        token.metadata = json.dumps({"mode": "advisor" if is_advisor else "form_filling"})
+
+        jwt_token = token.to_jwt()
+        logger.info(f"Generated {'advisor' if is_advisor else 'form-assistant'} token for room: {room_name}")
+
+        return {
+            "token": jwt_token,
+            "roomName": room_name,
+            "livekitUrl": os.getenv("LIVEKIT_URL", "wss://insurance-agent-m3m6v0tz.livekit.cloud"),
+        }
+    except Exception as e:
+        logger.error(f"Error generating form token: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/voice/trigger-outbound")
 async def trigger_outbound_call(req: TriggerOutboundRequest):
     """
@@ -155,7 +201,125 @@ async def trigger_outbound_call(req: TriggerOutboundRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ─── Cron Scheduler ─────────────────────────────────────────────────────────
+# ─── Vobiz Webhook ────────────────────────────────────────────────────────────
+
+def _normalize_phone_for_match(phone: str) -> str:
+    """Strip country code / formatting so we can match against our 10-digit DB values."""
+    if not phone:
+        return ""
+    cleaned = "".join(c for c in phone if c.isdigit())
+    # If 12-digit with 91 prefix, strip to last 10
+    if len(cleaned) == 12 and cleaned.startswith("91"):
+        return cleaned[2:]
+    # If 11-digit starting with 0, strip 0
+    if len(cleaned) == 11 and cleaned.startswith("0"):
+        return cleaned[1:]
+    # Return last 10 digits as a best-effort
+    return cleaned[-10:] if len(cleaned) >= 10 else cleaned
+
+
+async def _save_vobiz_recording(payload: dict):
+    """
+    Background task: match the Vobiz call to a lead via phone number,
+    then save recording URL, transcription, and duration to Supabase.
+    """
+    call_uuid      = payload.get("CallUUID", "")
+    record_url     = payload.get("RecordUrl", "")       # audio file URL
+    duration_str   = payload.get("RecordingDuration", "0")
+    transcription  = payload.get("TranscriptionText", "") or payload.get("Transcription", "")
+    from_number    = payload.get("From", "")
+    to_number      = payload.get("To", "")
+
+    if not record_url and not transcription:
+        logger.info("Vobiz webhook: no RecordUrl or TranscriptionText — nothing to save.")
+        return
+
+    # Parse duration (Vobiz sends it as string, sometimes float)
+    try:
+        duration_secs = int(float(duration_str))
+    except (ValueError, TypeError):
+        duration_secs = None
+
+    # Find lead — try matching both From and To against leads.phone
+    db = _get_supabase()
+    lead_id = None
+    for raw_phone in [from_number, to_number]:
+        normalized = _normalize_phone_for_match(raw_phone)
+        if not normalized:
+            continue
+        # Match last 10 digits stored in DB (some stored as 10-digit, some with +91)
+        res = (
+            db.table("leads")
+            .select("id, phone")
+            .or_(f"phone.eq.{normalized},phone.eq.+91{normalized},phone.eq.0{normalized}")
+            .limit(1)
+            .execute()
+        )
+        if res and res.data:
+            lead_id = res.data[0]["id"]
+            logger.info(f"Vobiz webhook: matched lead {lead_id} via phone {normalized}")
+            break
+
+    if not lead_id:
+        logger.warning(
+            f"Vobiz webhook: could not match lead for CallUUID={call_uuid} "
+            f"(From={from_number}, To={to_number}). Recording not saved."
+        )
+        return
+
+    # Build update payload — only set fields that arrived in this webhook
+    update: dict = {"vobiz_call_uuid": call_uuid}
+    if record_url:
+        update["call_recording_url"] = record_url
+    if transcription:
+        update["call_transcription"] = transcription
+    if duration_secs is not None:
+        update["call_duration_seconds"] = duration_secs
+
+    db.table("leads").update(update).eq("id", lead_id).execute()
+    logger.info(
+        f"Vobiz webhook: updated lead {lead_id} — "
+        f"recording={'yes' if record_url else 'no'}, "
+        f"transcription={'yes' if transcription else 'no'}, "
+        f"duration={duration_secs}s"
+    )
+
+
+@app.post("/api/vobiz/webhook", response_class=PlainTextResponse)
+async def vobiz_webhook(request: Request):
+    """
+    Vobiz recording / transcription webhook.
+
+    Vobiz sends application/x-www-form-urlencoded with fields:
+      CallUUID, RecordUrl, RecordingDuration, TranscriptionText, From, To, Direction ...
+
+    We respond with 200 immediately (Vobiz requires < 1–2s response),
+    then process in a background task.
+
+    Webhook URL to configure in Vobiz:
+      http://35-207-203-88.sslip.io/voice/api/vobiz/webhook
+    """
+    # Parse form body — Vobiz sends form-encoded, not JSON
+    try:
+        form = await request.form()
+        payload = dict(form)
+    except Exception:
+        # Fallback: try JSON body
+        try:
+            payload = await request.json()
+        except Exception:
+            payload = {}
+
+    call_uuid = payload.get("CallUUID", "unknown")
+    logger.info(f"Vobiz webhook received: CallUUID={call_uuid}, keys={list(payload.keys())}")
+
+    # Fire-and-forget background task so we respond instantly
+    asyncio.create_task(_save_vobiz_recording(payload))
+
+    # Vobiz requires a 200 plain-text or XML response
+    return "OK"
+
+
 
 async def scheduled_calls_checker():
     """
