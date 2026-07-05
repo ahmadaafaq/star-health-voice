@@ -313,16 +313,29 @@ class StarHealthAgent(Agent):
     ):
         """
         Prune conversation history before each LLM call by keeping only the last
-        N complete turns. A turn starts when a 'user' message is seen.
-        This guarantees tool call request/response pairs are never separated
-        (avoiding API validation errors and loops).
+        N complete turns, and pruning old system notifications to reduce token overhead
+        and cost on Groq billing.
         """
-        MAX_TURNS = 6  # Keep last 6 turns; system prompt has full customer profile so older history is redundant
+        # Form filling needs very short context (3 turns); advisor needs slightly more (4 turns)
+        MAX_TURNS = 3 if self._is_form_mode else 4
 
         from livekit.agents.llm import ChatMessage
         all_items = [m for m in chat_ctx.items if isinstance(m, ChatMessage)]
-        system_msgs = [m for m in all_items if m.role == "system"]
-        conv_msgs   = [m for m in all_items if m.role != "system"]
+        
+        # Keep only the primary persona system message or role switch prompt.
+        # Temporary system notifications are kept only if they are extremely recent (e.g. within the last 3 items)
+        # to ensure they are processed exactly once and then discarded.
+        system_msgs = []
+        for idx, m in enumerate(all_items):
+            if m.role == "system":
+                if "You are Priya" in m.content or "ROLE SWITCH" in m.content:
+                    system_msgs.append(m)
+                elif "[System Notification:" in m.content:
+                    # Keep only if it is very recent (e.g., last 3 messages of chat context)
+                    if len(all_items) - idx <= 3:
+                        system_msgs.append(m)
+
+        conv_msgs = [m for m in all_items if m.role != "system"]
 
         # Group conversation messages into complete turns starting with a user message
         turns = []
@@ -347,6 +360,12 @@ class StarHealthAgent(Agent):
             pruned_ctx.items.extend(pruned_conv)
             chat_ctx = pruned_ctx
             logger.info("History pruned to %d complete turns (%d messages)", MAX_TURNS, len(pruned_conv))
+        else:
+            # Even if turns are within MAX_TURNS, we still want to prune old system notifications
+            pruned_ctx = ChatContext()
+            pruned_ctx.items.extend(system_msgs)
+            pruned_ctx.items.extend(conv_msgs)
+            chat_ctx = pruned_ctx
 
         return Agent.default.llm_node(self, chat_ctx, tools, model_settings)
 
