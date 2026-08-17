@@ -1,9 +1,10 @@
 import os
 
 # ─── LLM (Groq) ───────────────────────────────────────────────────────────────
-GROQ_MODEL = "llama-3.3-70b-versatile"   # Specdec is decommissioned; using the standard versatile model for high quality.
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")  # Migrated from deprecated llama-3.3-70b-versatile
 GROQ_TEMPERATURE = 0.4            # lower = shorter, more predictable voice replies
-GROQ_MAX_TOKENS = 100             # 1-2 sentences ≈ 40-80 tokens; cap prevents runaway generation
+GROQ_MAX_TOKENS = 150             # 1-2 sentences; generates richer responses so allow slightly more headroom
+
 
 # ─── STT (Deepgram) ───────────────────────────────────────────────────────────
 DEEPGRAM_STT_MODEL = "nova-2-general"
@@ -14,8 +15,15 @@ TTS_PROVIDER = "elevenlabs"            # Options: "sarvam" or "elevenlabs"
 # ElevenLabs Settings
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "6kpMXeRmTQXHAKa2goju")
-ELEVENLABS_MODEL = "eleven_flash_v2_5"  # Lowest latency (~75ms TTFA) with full multilingual/Hindi support
-                                        # Alternatives: "eleven_turbo_v2_5" (~150ms), "eleven_multilingual_v2" (~400ms)
+ELEVENLABS_MODEL = os.getenv("ELEVENLABS_MODEL", "eleven_turbo_v2_5")  # Recommended multilingual low-latency model for LiveKit WebSocket streaming
+                                                                         # (eleven_v3 is REST-only and returns 403 on WebSocket multi-stream-input)
+
+# Expressive Voice Settings
+# Lower stability (0.35) unlocks emotional pitch dynamics & inflection; high stability (>0.7) forces flat monotone speech.
+ELEVENLABS_STABILITY = float(os.getenv("ELEVENLABS_STABILITY", "0.35"))
+ELEVENLABS_SIMILARITY = float(os.getenv("ELEVENLABS_SIMILARITY", "0.75"))
+ELEVENLABS_STYLE = float(os.getenv("ELEVENLABS_STYLE", "0.20"))  # Lowered from 0.45: reduces ElevenLabs server processing time by ~100ms
+
 
 # Sarvam Settings
 SARVAM_MODEL = "bulbul:v2"
@@ -24,7 +32,7 @@ SARVAM_LANGUAGE = "hi-IN"         # Synthesizes Hindi/Hinglish speech
 
 # ─── VAD (Silero) ─────────────────────────────────────────────────────────────
 # Lower min_silence_duration = faster response but may interrupt the user
-VAD_MIN_SILENCE_DURATION = 0.25   # seconds (250 ms) — minimum allowed by LiveKit's TurnDetector
+VAD_MIN_SILENCE_DURATION = 0.30   # seconds — 8kHz silero halves lag vs 0.25 original; 0.30 is a safe buffer
 VAD_ACTIVATION_THRESHOLD = 0.5
 
 # ─── Star Health Plans (compact reference — injected into system prompt) ──────
@@ -71,6 +79,18 @@ PLAN_NAME_MAP = {
     "young-star": "यंग स्टार",
     "super-star": "सुपर स्टार",
     "star-comprehensive": "स्टार कॉम्प्रीहेंसिव"
+}
+
+# ─── Plan Starting Prices (source of truth — injected into system prompt) ────────────────────
+PLAN_PRICE_MAP = {
+    "young-star": "699",
+    "family-health-optima": "1,199",
+    "arogya-sanjeevani": "799",
+    "medi-classic": "899",
+    "star-assure": "1,499",
+    "star-premier": "1,899",
+    "super-star": "2,299",
+    "star-comprehensive": "1,099",
 }
 
 # ─── Common Names Devanagari Phonetics Map ──────────────────────────────────────
