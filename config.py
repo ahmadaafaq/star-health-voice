@@ -1,10 +1,10 @@
 import os
 
 # ─── LLM (Groq) ───────────────────────────────────────────────────────────────
-# qwen/qwen3.6-27b gives the lowest TTFT (~130ms) & highest tokens/sec for voice latency
-GROQ_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
+# openai/gpt-oss-120b delivers clean, instant responses without <think> tag latency
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 GROQ_TEMPERATURE = 0.4            # lower = shorter, more predictable voice replies
-GROQ_MAX_TOKENS = 150             # 1-2 sentences; generates richer responses so allow slightly more headroom
+GROQ_MAX_TOKENS = 180             # 1-2 sentences
 
 
 # ─── STT (Deepgram) ───────────────────────────────────────────────────────────
