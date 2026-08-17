@@ -187,6 +187,53 @@ async def _search_http_fallback(query: str) -> list[dict]:
         return []
 
 
+# ── Speech-safe output cleaner ─────────────────────────────────────────────────
+
+import re
+
+def _clean_for_speech(text: str) -> str:
+    """
+    Strip policy codes, UINs, IRDAI reference numbers, CIN codes and other
+    non-speakable tokens from RAG chunk text before returning to the LLM.
+
+    Patterns removed:
+      - UIN codes        e.g. SHAHLIP21042V032021, UIN: XYZ123
+      - CIN numbers      e.g. L66010TN1973PLC005793
+      - IRDAI reg codes  e.g. IRDAI/HLT/SHI/P-H/V.I/164/2013-14
+      - Section/item codes like 009400, A-009, Sec-IV-B
+      - Bare long numbers >6 digits that aren't prices (prices have ₹/Rs/Lakh/Crore context)
+      - Slash-delimited reference strings  e.g. IRDA/NL-HLT/SHAI/P-H/V.I/321/12-13
+    """
+    # Remove UIN lines/inline (key: value style)
+    text = re.sub(r'\bU\.?I\.?N\.?\s*[:\-]?\s*[A-Z0-9]{8,30}\b', '', text, flags=re.IGNORECASE)
+
+    # Remove CIN numbers (company identification numbers)
+    text = re.sub(r'\b[A-Z]\d{5}[A-Z]{2}\d{4}[A-Z]{3}\d{6}\b', '', text)
+
+    # Remove IRDAI/IRDA slash-reference codes
+    text = re.sub(r'\bIRDA[I]?/[\w\-/]+', '', text, flags=re.IGNORECASE)
+
+    # Remove standalone alphanumeric codes: 3+ letters followed by 4+ digits (or vice versa)
+    # e.g. SHI2021, SHAI164, P-H, V.I but NOT plan names like "Young Star"
+    text = re.sub(r'\b[A-Z]{2,6}[\-/]?[A-Z0-9]{3,}[\-/]?[A-Z0-9]*\b(?!\s*(plan|star|health|assure|optima|classic|premier|comprehensive|sanjeevani))', '', text)
+
+    # Remove standalone long digit strings >6 digits that are not rupee amounts
+    # Keep: "5 Lakh", "10,000", "₹699" — remove: "009400", "12345678"
+    text = re.sub(r'(?<![₹,\d])\b0*\d{6,}\b(?!\s*(lakh|crore|rupee|per|month|year|day|%|,))', '', text, flags=re.IGNORECASE)
+
+    # Remove section codes like "Sec-IV-B", "Cl. 3.2.1", "Item 009"
+    text = re.sub(r'\b(sec|cl|item|clause|para|pt|sch|ann)[\.\-\s]?[IVX\d\.]+\b', '', text, flags=re.IGNORECASE)
+
+    # Remove file/form numbers like "F-125/2021", "Form HLT-01"
+    text = re.sub(r'\b(form|file|ref|no\.?)\s*[\w\-/]{3,}\b', '', text, flags=re.IGNORECASE)
+
+    # Clean up extra whitespace left by removals
+    text = re.sub(r'\s{2,}', ' ', text).strip()
+    text = re.sub(r'\s+([,\.\;\:])', r'\1', text)
+
+    return text
+
+
 # ── Tool ───────────────────────────────────────────────────────────────────────
 
 @function_tool()
@@ -201,16 +248,35 @@ async def search_policies(context: RunContext, query: str) -> str:
     Args:
         query: The customer's question or the specific detail you need to look up.
     """
-    logger.info("Policy search (in-process=%s): %s", _policy_faiss_index is not None, query)
+    import config
+    lead = context.userdata.get("lead") or {}
+    rec_plan = lead.get("recommended_plan_id") or lead.get("recommended_plan") or ""
+    rec_plan_name = config.PLAN_NAME_MAP.get(rec_plan, rec_plan)
+
+    search_query = query
+    if rec_plan_name and rec_plan_name.lower() not in query.lower():
+        search_query = f"{rec_plan_name} {query}"
+
+    logger.info("Policy search (query='%s', augmented='%s', in-process=%s)", query, search_query, _policy_faiss_index is not None)
 
     if _policy_model is not None and _policy_faiss_index is not None:
-        chunks = await _search_in_process(query)
+        chunks = await _search_in_process(search_query)
     else:
-        chunks = await _search_http_fallback(query)
+        chunks = await _search_http_fallback(search_query)
+
 
     if not chunks:
         logger.warning("No policy chunks found for query: %s", query)
         return "I don't have specific details on that, but I can connect you with our product team."
 
     combined = " ".join(c.get("content", "") for c in chunks[:3])
-    return combined[:500] if len(combined) > 500 else combined
+    combined = combined[:600] if len(combined) > 600 else combined
+
+    # Strip policy codes / UINs / reference numbers before sending to LLM
+    cleaned = _clean_for_speech(combined)
+
+    if not cleaned.strip():
+        return "I don't have specific details on that. Our product team can share the complete policy document."
+
+    logger.info("RAG cleaned output (%d→%d chars): %s", len(combined), len(cleaned), cleaned[:120])
+    return cleaned

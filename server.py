@@ -115,7 +115,7 @@ async def get_token(leadId: Optional[str] = Query(None)):
 
 
 @app.get("/api/voice/form-token")
-async def get_form_token(mode: str = "form_filling"):
+async def generate_form_token(mode: str = "", step: int = 1, planId: str = "", leadId: str = ""):
     """
     Generate a LiveKit WebRTC token for the Voice Form Assistant or Policy Advisor.
     No lead ID required — this is for anonymous pre-submission form sessions.
@@ -130,9 +130,14 @@ async def get_form_token(mode: str = "form_filling"):
             raise HTTPException(status_code=500, detail="LiveKit credentials missing in .env")
 
         is_advisor = mode == "advisor"
-        room_prefix = "advisor-room-" if is_advisor else "form-room-"
-        room_name = f"{room_prefix}{os.urandom(4).hex()}"
+        if is_advisor and planId:
+            room_name = f"advisor-room-{planId}-{os.urandom(4).hex()}"
+        elif is_advisor:
+            room_name = f"advisor-room-{os.urandom(4).hex()}"
+        else:
+            room_name = f"form-room-{os.urandom(4).hex()}"
         participant_identity = f"visitor-{os.urandom(3).hex()}"
+
 
         token = AccessToken(api_key, api_secret)
         token.with_grants(VideoGrants(
@@ -144,7 +149,12 @@ async def get_form_token(mode: str = "form_filling"):
         ))
         token.identity = participant_identity
         token.name = "Web Visitor (Policy Advisor)" if is_advisor else "Web Visitor (Form Assistant)"
-        token.metadata = json.dumps({"mode": "advisor" if is_advisor else "form_filling"})
+        meta_dict = {"mode": "advisor" if is_advisor else "form_filling"}
+        if planId:
+            meta_dict["plan_id"] = planId
+        if leadId:
+            meta_dict["lead_id"] = leadId
+        token.metadata = json.dumps(meta_dict)
 
         jwt_token = token.to_jwt()
         logger.info(f"Generated {'advisor' if is_advisor else 'form-assistant'} token for room: {room_name}")
@@ -240,24 +250,47 @@ async def _save_vobiz_recording(payload: dict):
     except (ValueError, TypeError):
         duration_secs = None
 
-    # Find lead — try matching both From and To against leads.phone
+    # Find lead — two-pass strategy:
+    #   Pass 1: prefer leads with call_status='dialing' for that phone (the lead that was
+    #           actually being called right now — most specific match).
+    #   Pass 2: fall back to most recently created lead with that phone number.
+    # This handles the case where multiple leads share the same phone number (e.g. the
+    # agent tests an outbound call using their own number stored in different lead records).
     db = _get_supabase()
     lead_id = None
     for raw_phone in [from_number, to_number]:
         normalized = _normalize_phone_for_match(raw_phone)
         if not normalized:
             continue
-        # Match last 10 digits stored in DB (some stored as 10-digit, some with +91)
-        res = (
+        phone_filter = f"phone.eq.{normalized},phone.eq.+91{normalized},phone.eq.0{normalized}"
+
+        # Pass 1 — lead that is currently being dialed (most specific)
+        dialing_res = (
             db.table("leads")
-            .select("id, phone")
-            .or_(f"phone.eq.{normalized},phone.eq.+91{normalized},phone.eq.0{normalized}")
+            .select("id, phone, call_status")
+            .or_(phone_filter)
+            .eq("call_status", "dialing")
+            .order("created_at", desc=True)
             .limit(1)
             .execute()
         )
-        if res and res.data:
-            lead_id = res.data[0]["id"]
-            logger.info(f"Vobiz webhook: matched lead {lead_id} via phone {normalized}")
+        if dialing_res and dialing_res.data:
+            lead_id = dialing_res.data[0]["id"]
+            logger.info(f"Vobiz webhook: matched DIALING lead {lead_id} via phone {normalized}")
+            break
+
+        # Pass 2 — most recently created lead with that phone (fallback)
+        recent_res = (
+            db.table("leads")
+            .select("id, phone")
+            .or_(phone_filter)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if recent_res and recent_res.data:
+            lead_id = recent_res.data[0]["id"]
+            logger.info(f"Vobiz webhook: matched most-recent lead {lead_id} via phone {normalized}")
             break
 
     if not lead_id:

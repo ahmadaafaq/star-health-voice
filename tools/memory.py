@@ -8,6 +8,7 @@ short-term memory that survives across calls with the same customer.
 Pattern adapted from livekit-examples/supabase-hacker-starter.
 """
 
+import asyncio
 import logging
 import os
 from typing import Optional
@@ -49,14 +50,18 @@ async def remember_detail(context: RunContext, label: str, value: str) -> str:
 
     try:
         db = _get_supabase()
-        db.table("agent_memories").upsert(
-            {
-                "lead_id": lead_id,
-                "memory_type": label.strip().lower().replace(" ", "_"),
-                "content": value.strip(),
-            },
-            on_conflict="lead_id,memory_type"
-        ).execute()
+        norm_label = label.strip().lower().replace(" ", "_")
+        # Run synchronous Supabase SDK in a thread to avoid blocking the event loop
+        await asyncio.to_thread(
+            lambda: db.table("agent_memories").upsert(
+                {
+                    "lead_id": lead_id,
+                    "memory_type": norm_label,
+                    "content": value.strip(),
+                },
+                on_conflict="lead_id,memory_type"
+            ).execute()
+        )
         logger.info(f"Memory saved: lead={lead_id}, {label}={value}")
         return f"Got it, I've noted that."
     except Exception as e:
@@ -79,11 +84,12 @@ async def recall_detail(context: RunContext, label: str) -> str:
 
     try:
         db = _get_supabase()
-        res = (
-            db.table("agent_memories")
+        norm_label = label.strip().lower()
+        res = await asyncio.to_thread(
+            lambda: db.table("agent_memories")
             .select("content")
             .eq("lead_id", lead_id)
-            .eq("memory_type", label.strip().lower())
+            .eq("memory_type", norm_label)
             .maybe_single()
             .execute()
         )
@@ -110,9 +116,9 @@ async def search_memories(context: RunContext, query: str) -> str:
 
     try:
         db = _get_supabase()
-        # Full-text search across memory content
-        res = (
-            db.table("agent_memories")
+        # Run synchronous Supabase SDK in a thread to avoid blocking the event loop
+        res = await asyncio.to_thread(
+            lambda: db.table("agent_memories")
             .select("memory_type, content")
             .eq("lead_id", lead_id)
             .ilike("content", f"%{query}%")

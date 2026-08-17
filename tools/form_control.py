@@ -17,10 +17,74 @@ SERVER-SIDE STEP STATE:
 import json
 import logging
 import time
+import re
 from typing import Dict
 from livekit.agents import RunContext, function_tool
 
 logger = logging.getLogger("star-health-agent.form_control")
+
+def text_to_digits(text: str) -> str:
+    """Convert English and Hindi number words to a clean digit string."""
+    text = text.lower().strip()
+    
+    # Word maps
+    word_map = {
+        "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+        "five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+        "double": "double", "triple": "triple",
+        "oh": "0", "o": "0", "nought": "0",
+        
+        # Hindi digits
+        "शून्य": "0", "जीरो": "0", "ज़ीरो": "0", "एक": "1", "दो": "2", "तीन": "3", "चार": "4",
+        "पांच": "5", "पाँच": "5", "छह": "6", "छः": "6", "चे": "6", "सात": "7", "आठ": "8", "नौ": "9",
+        
+        # Devanagari spellings of English digits (very common when STT language is 'hi')
+        "वन": "1", "टू": "2", "थ्री": "3", "फोर": "4", "फ़ोर": "4", "फाइव": "5", "फ़ाइव": "5",
+        "सिक्स": "6", "सेवन": "7", "एट": "8", "नाइन": "9",
+        
+        # Common English double digits
+        "ten": "10", "eleven": "11", "twelve": "12", "thirteen": "13", "fourteen": "14",
+        "fifteen": "15", "sixteen": "16", "seventeen": "17", "eighteen": "18", "nineteen": "19",
+        "twenty": "20", "thirty": "30", "forty": "40", "fifty": "50", "sixty": "60",
+        "seventy": "70", "eighty": "80", "ninety": "90"
+    }
+    
+    # Replace punctuation
+    text = text.replace("-", " ").replace(",", " ").replace(".", " ")
+    tokens = text.split()
+    
+    result = []
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        
+        # Handle double / triple multiplier prefix
+        if token in ("double", "twice") and i + 1 < len(tokens):
+            next_token = tokens[i+1]
+            digit = word_map.get(next_token, next_token)
+            if len(digit) == 1 and digit.isdigit():
+                result.append(digit * 2)
+                i += 2
+                continue
+        elif token in ("triple", "thrice") and i + 1 < len(tokens):
+            next_token = tokens[i+1]
+            digit = word_map.get(next_token, next_token)
+            if len(digit) == 1 and digit.isdigit():
+                result.append(digit * 3)
+                i += 2
+                continue
+                
+        # Resolve standard token
+        if token in word_map:
+            result.append(word_map[token])
+        else:
+            # If token is already digits, keep them
+            digits = re.sub(r"\D", "", token)
+            if digits:
+                result.append(digits)
+        i += 1
+        
+    return "".join(result)
 
 # ── Per-room step state ──────────────────────────────────────────────────────
 # Key: room name (str) → {"step": int, "last_advance_ts": float}
@@ -30,14 +94,20 @@ MIN_ADVANCE_COOLDOWN_SECS = 5.0  # Minimum seconds between advance calls
 MAX_STEP = 4
 
 
-def _get_state(ctx: RunContext) -> dict:
-    """Get or create state for the current room."""
-    room = ctx.userdata.get("room")
+def _get_state(ctx) -> dict:
+    """Get or create state for the current room.
+    Accepts both RunContext (tool calls: ctx.userdata) and
+    JobContext (data packet handler: ctx.proc.userdata).
+    """
+    # RunContext exposes ctx.userdata; JobContext requires ctx.proc.userdata
+    userdata = ctx.userdata if hasattr(ctx, 'userdata') else ctx.proc.userdata
+    room = userdata.get("room")
     room_name = room.name if room else "unknown"
     if room_name not in _room_step_state:
         # Prepopulate fields from existing lead object in userdata if available
         initial_fields = {}
-        lead = ctx.userdata.get("lead")
+        lead = userdata.get("lead")
+
         if lead and isinstance(lead, dict):
             initial_fields["lead_name"] = lead.get("name") or ""
             initial_fields["lead_phone"] = lead.get("phone") or ""
@@ -67,7 +137,9 @@ def _get_state(ctx: RunContext) -> dict:
             "last_advance_ts": 0.0,
             "submitted": False,
             "last_update_ts": 0.0,
-            "fields": initial_fields
+            "fields": initial_fields,
+            # Fields the customer manually typed — agent must NEVER overwrite these
+            "manually_locked": set()
         }
     return _room_step_state[room_name]
 
@@ -140,10 +212,35 @@ async def update_form_field(ctx: RunContext, field: str, value: str) -> str:
             logger.warning(f"Email validation failed: Devanagari script detected in '{value}'")
             return f"ERROR: Always write lead_email using English characters only (Latin script). You provided '{value}' (in Devanagari). Please write it in English characters and call update_form_field again."
 
+    # ── LOCK CHECK: If this field was manually entered by the customer, NEVER overwrite ──
+    if field == "lead_phone":
+        state_check = _get_state(ctx)
+        if field in state_check.get("manually_locked", set()):
+            locked_val = state_check.get("fields", {}).get(field, "")
+            logger.info(f"update_form_field blocked: '{field}' is manually locked (value='{locked_val}')")
+            return (
+                f"LOCKED: The customer already manually typed their phone number ('{locked_val}') directly on screen. "
+                f"Do NOT overwrite it. Accept this value as correct and move on to the next question."
+            )
+
     # ── VALIDATION & CLEANING: Enforce 10-digit mobile phone number ──
     if field == "lead_phone":
-        # Strip all non-digit characters
-        cleaned = re.sub(r"\D", "", value)
+        # Convert English and Hindi number words to clean digit string
+        cleaned = text_to_digits(str(value))
+        
+        state = _get_state(ctx)
+        existing = state.get("fields", {}).get("lead_phone", "")
+        existing_cleaned = re.sub(r"\D", "", str(existing))
+        
+        # Accumulate if we have a partial phone number and the incoming value is short
+        if len(cleaned) < 10 and existing_cleaned and not cleaned.startswith(existing_cleaned):
+            combined = existing_cleaned + cleaned
+            if len(combined) <= 10:
+                cleaned = combined
+            elif len(combined) > 10 and combined.startswith("91") and len(combined) == 12:
+                cleaned = combined[2:]
+            elif len(combined) > 10:
+                cleaned = combined[:10]
         
         # Handle country code prefixes
         if len(cleaned) == 12 and cleaned.startswith("91"):
@@ -153,7 +250,15 @@ async def update_form_field(ctx: RunContext, field: str, value: str) -> str:
             
         if len(cleaned) != 10:
             logger.warning(f"Phone number validation failed: {value} cleaned to {cleaned} (len={len(cleaned)})")
-            return f"ERROR: Phone number must be exactly 10 digits. The value you provided was cleaned to '{cleaned}' ({len(cleaned)} digits). Please ask the customer to repeat their 10-digit mobile number clearly."
+            # Save the partial digits so they appear on screen for visual feedback
+            if "fields" not in state:
+                state["fields"] = {}
+            state["fields"]["lead_phone"] = cleaned
+            return (
+                f"ERROR: Phone number must be exactly 10 digits. Currently we have '{cleaned}' ({len(cleaned)} digits). "
+                f"Please ask the customer to say the remaining digits, or repeat their full 10-digit number. "
+                f"Remind them they can also type it directly on screen if it is easier."
+            )
         
         parsed_val: any = cleaned
     else:
@@ -179,10 +284,64 @@ async def update_form_field(ctx: RunContext, field: str, value: str) -> str:
     state = _get_state(ctx)
     if "fields" not in state:
         state["fields"] = {}
+
+    # ── VALIDATION: Member count limits (mirrors the browser UI limits) ──────────
+    # Children: max 3 | My Parents: max 2 | Spouse Parents: max 2 | Total: max 9
+    MAX_CHILDREN       = 3
+    MAX_MY_PARENTS     = 2
+    MAX_SPOUSE_PARENTS = 2
+    MAX_TOTAL_MEMBERS  = 9
+
+    if field in ("children_count", "my_parents_count", "spouse_parents_count"):
+        try:
+            requested = int(parsed_val)
+        except (ValueError, TypeError):
+            requested = 0
+
+        if field == "children_count" and requested > MAX_CHILDREN:
+            logger.warning(f"children_count {requested} exceeds max {MAX_CHILDREN}")
+            return (
+                f"ERROR: Maximum {MAX_CHILDREN} children can be added to the policy. "
+                f"The customer requested {requested}. Politely tell them that the plan allows a maximum of {MAX_CHILDREN} children, "
+                f"and ask them how many they would like to add (between 1 and {MAX_CHILDREN})."
+            )
+
+        if field == "my_parents_count" and requested > MAX_MY_PARENTS:
+            logger.warning(f"my_parents_count {requested} exceeds max {MAX_MY_PARENTS}")
+            return (
+                f"ERROR: Maximum {MAX_MY_PARENTS} parents (your own) can be added to the policy. "
+                f"The customer requested {requested}. Politely tell them the limit is {MAX_MY_PARENTS} parents, "
+                f"and ask how many they would like (1 or 2)."
+            )
+
+        if field == "spouse_parents_count" and requested > MAX_SPOUSE_PARENTS:
+            logger.warning(f"spouse_parents_count {requested} exceeds max {MAX_SPOUSE_PARENTS}")
+            return (
+                f"ERROR: Maximum {MAX_SPOUSE_PARENTS} spouse's parents can be added to the policy. "
+                f"The customer requested {requested}. Politely tell them the limit is {MAX_SPOUSE_PARENTS}, "
+                f"and ask how many they would like (1 or 2)."
+            )
+
+        # Check total member cap
+        fields = state["fields"]
+        myself   = 1 if fields.get("myself_selected") else 0
+        spouse   = 1 if fields.get("spouse_selected") else 0
+        children = int(fields.get("children_count", 0)) if field != "children_count"      else requested
+        my_p     = int(fields.get("my_parents_count", 0)) if field != "my_parents_count"  else requested
+        sp_p     = int(fields.get("spouse_parents_count", 0)) if field != "spouse_parents_count" else requested
+        total    = myself + spouse + children + my_p + sp_p
+        if total > MAX_TOTAL_MEMBERS:
+            logger.warning(f"Total member count {total} exceeds max {MAX_TOTAL_MEMBERS}")
+            return (
+                f"ERROR: The total number of insured members cannot exceed {MAX_TOTAL_MEMBERS}. "
+                f"Current total would be {total}. Politely inform the customer of this limit and suggest they reduce the count."
+            )
+
     state["fields"][field] = parsed_val
     state["last_update_ts"] = time.monotonic()
     await _publish(ctx, {"type": "form_update", "field": field, "value": parsed_val})
     return "ok"
+
 
 
 @function_tool
@@ -221,8 +380,8 @@ async def advance_form_step(ctx: RunContext) -> str:
 async def submit_form(ctx: RunContext) -> str:
     """
     Trigger final form submission to generate the AI insurance recommendation.
-    Call this ONLY after the customer has verbally confirmed ALL details on Step 4
-    (lead_name, lead_phone, lead_gender are filled and customer said yes/confirm).
+    Call this ONLY after the customer has verbally confirmed details on Step 4
+    (lead_name and lead_gender filled, lead_phone is optional if declined, and customer said yes/confirm).
     WARNING: This can only be called ONCE per session. Duplicate calls will be rejected.
     """
     state = _get_state(ctx)
